@@ -14,4 +14,11 @@ start:
 .include "x16.inc"
 .include "audio.inc"
 
+.import register_handler
+.import deregister_handler
+
 main:
+;    jsr register_handler
+
+;    jsr deregister_handler
+    rts
