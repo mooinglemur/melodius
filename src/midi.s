@@ -1,9 +1,9 @@
 
 .include "x16.inc"
 
-MAX_TRACKS = 16
-MIDI_CHANNELS = 16
-YM2151_CHANNELS = 8
+.define MAX_TRACKS 16
+.define MIDI_CHANNELS 16
+.define YM2151_CHANNELS 8
 
 .struct MIDIFile
     startbank   .byte
@@ -14,35 +14,41 @@ YM2151_CHANNELS = 8
 .endstruct
 
 .struct MIDITrack
-    startbank   .byte MAX_TRACKS
-    startoffset .word MAX_TRACKS
-    curbank     .byte MAX_TRACKS
-    curoffset   .word MAX_TRACKS
-    delay       .dword MAX_TRACKS
-    playable    .byte MAX_TRACKS
+    startbank    .byte MAX_TRACKS
+    startoffsetL .byte MAX_TRACKS
+    startoffsetH .byte MAX_TRACKS
+    curbank      .byte MAX_TRACKS
+    curoffsetL   .byte MAX_TRACKS
+    curoffsetH   .byte MAX_TRACKS
+    delayL       .byte MAX_TRACKS
+    delayM       .byte MAX_TRACKS
+    delayH       .byte MAX_TRACKS
+    delayU       .byte MAX_TRACKS
+    playable     .byte MAX_TRACKS
 .endstruct
 
 .struct MIDIState
     tempo       .dword
-    tickrate    .word
+    perframe    .byte
+    playing     .byte
 .endstruct
 
 .struct MIDIChannel
     modwheel    .byte MIDI_CHANNELS
+    instrument  .byte MIDI_CHANNELS
     volume      .byte MIDI_CHANNELS
     pan         .byte MIDI_CHANNELS
     expression  .byte MIDI_CHANNELS
     damper      .byte MIDI_CHANNELS
-    pitchbend   .word MIDI_CHANNELS
+    pitchbend   .byte MIDI_CHANNELS ; signed 8 bit
 .endstruct
 
 .struct YMChannel
     midichannel .byte YM2151_CHANNELS
     note        .byte YM2151_CHANNELS ; 0 if released
-    framecnt    .byte YM2151_CHANNELS ; frames since change of note
+    framecnt    .byte YM2151_CHANNELS ; frames since change of note (255 max)
     instrument  .byte YM2151_CHANNELS ; patch number
 .endstruct
-
 
 
 .segment "ZEROPAGE"
@@ -232,7 +238,7 @@ add_m:
     bcc store_m2
     sbc #$20
     inc X16::Reg::RAMBank
-store_m2
+store_m2:
     sta midizp+1
 
     ; High byte
@@ -263,11 +269,17 @@ done:
     sta X16::Reg::RAMBank
     stx midizp
     sty midizp+1
-    
+
+    stz midistate + MIDIState::playing
+    lda #1
+    sta midistate + MIDIState::perframe
+
     ldy #0
     ; Header "MThd"
     COMPARE_BYTES MThd, 4
-    bcs error
+    bcc :+
+    jmp error
+:
 
     ; 32-bit big-endian chunk length
     jsr get_chunklen
@@ -312,33 +324,11 @@ trackloop:
     lda X16::Reg::RAMBank
     sta miditracks + MIDITrack::startbank,x
     tya
-    sta miditracks + MIDITrack::startoffset,x
+    sta miditracks + MIDITrack::startoffsetL,x
     lda midizp+1
-    sta miditracks + MIDITrack::startoffset+1,x
+    sta miditracks + MIDITrack::startoffsetH,x
     
-    ; pull the first delta value out
-    jsr get_variable_length
-    
-    ; store the first event with the delta saved
-    ldx track_iter
-    lda variable_length
-    sta miditracks + MIDITrack::delay,x
-    lda variable_length+1
-    sta miditracks + MIDITrack::delay+1,x
-    lda variable_length+2
-    sta miditracks + MIDITrack::delay+2,x
-    lda variable_length+3
-    sta miditracks + MIDITrack::delay+3,x
-
-    lda X16::Reg::RAMBank
-    sta miditracks + MIDITrack::curbank,x
-    tya
-    sta miditracks + MIDITrack::curoffset,x
-    lda midizp+1
-    sta miditracks + MIDITrack::curoffset+1,x
-
-    lda #1
-    sta miditracks + MIDITrack::playable,x
+    stz miditracks + MIDITrack::playable,x
 
     jsr advance_to_end_of_chunk
 
@@ -358,3 +348,51 @@ error:
     rts
 .endproc
 
+
+.proc restart: near
+    
+    stz track_iter
+trackloop:
+    ldx track_iter
+    lda miditracks + MIDITrack::startbank,x
+    sta X16::Reg::RAMBank
+
+    ; we're loading directly into y since it is more work not to
+    ldy miditracks + MIDITrack::startoffsetL,x
+    stz midizp
+    lda miditracks + MIDITrack::startoffsetH,x
+    sta midizp+1
+    
+    ; pull the first delta value out
+    jsr get_variable_length
+    
+    ; store the first event with the delta saved
+    ldx track_iter
+    lda variable_length
+    sta miditracks + MIDITrack::delayL,x
+    lda variable_length+1
+    sta miditracks + MIDITrack::delayM,x
+    lda variable_length+2
+    sta miditracks + MIDITrack::delayH,x
+    lda variable_length+3
+    sta miditracks + MIDITrack::delayU,x
+
+    lda X16::Reg::RAMBank
+    sta miditracks + MIDITrack::curbank,x
+
+    tya
+    sta miditracks + MIDITrack::curoffsetL,x
+    lda midizp+1
+    sta miditracks + MIDITrack::curoffsetH,x
+
+    lda #1
+    sta miditracks + MIDITrack::playable,x
+
+    inc track_iter
+    ldx track_iter
+    cpx midifile + MIDIFile::ntracks
+    bcc trackloop
+
+    clc
+    rts
+.endproc

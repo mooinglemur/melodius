@@ -7,7 +7,7 @@
 .segment "BSS"
 old_irq_handler:
     .res 2
-
+.segment "CODE"
 
 register_handler:
     php
