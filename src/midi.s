@@ -24,7 +24,7 @@
     .include "audio.inc"
 .endscope
 
-.define MAX_TRACKS 16
+.define MAX_TRACKS 24
 .define MIDI_CHANNELS 16
 .define YM2151_CHANNELS 8
 
@@ -48,6 +48,7 @@
     deltaM       .byte MAX_TRACKS
     deltaH       .byte MAX_TRACKS
     deltaU       .byte MAX_TRACKS
+    prevstatus   .byte MAX_TRACKS
     playable     .byte MAX_TRACKS
 .endstruct
 
@@ -107,8 +108,6 @@ cur_velocity:
     .res 1
 variable_length:
     .res 4
-previous_status:
-    .res 1
 tmp1:
     .res 1 ; assumed free to use at all times but unsafe after jsr
 tmp2:
@@ -473,9 +472,7 @@ trackloop:
     bcc trackloop
 
     ; set default tempo of 120 bpm
-    ;DEFAULT_TEMPO = 500000
-    DEFAULT_TEMPO = 352941 ; 170 bpm
-
+    DEFAULT_TEMPO = 500000
     
     lda #<(DEFAULT_TEMPO)
     sta midistate + MIDIState::tempo+0
@@ -568,6 +565,15 @@ save_deltas:
 
 .proc midi_play: near
     sta midistate + MIDIState::playing
+    ; We're resetting the instruments to $FF since we don't know
+    ; What patches are loaded into the YM2151's channels
+    ldx #0
+    lda #$FF
+iloop:
+    sta ymchannels + YMChannel::instrument,x
+    inx
+    cpx #YM2151_CHANNELS
+    bcc iloop
     rts
 .endproc
 
@@ -632,7 +638,6 @@ trackloop:
 eventloop:
     ; if the MSB of the track's delta is positive, we're now
     ; in delay, so move on to the next track
-;    stp
     ldx track_iter
     lda miditracks + MIDITrack::deltaU,x
     bpl nexttrack
@@ -647,9 +652,10 @@ eventloop:
 
     jsr rewind_indirect_byte
 
-    lda previous_status
+    ; ldx track_iter  X should still be clean here
+    lda miditracks + MIDITrack::prevstatus,x
 normal_status:
-    sta previous_status
+    sta miditracks + MIDITrack::prevstatus,x
 
     cmp #$90
     bcc event_note_off    ; $80-$8F
@@ -708,6 +714,10 @@ event_sysex: ; $F0/$F7
     bra next_event
 event_meta: ; $FF
     jsr do_event_meta
+    ; Track could have ended during this tick, so we need to check here
+    ldx track_iter
+    lda miditracks + MIDITrack::playable,x
+    beq nexttrack
     ; bra next_event (no need)
 next_event:
     jsr get_delta ; this loads X with track_iter
@@ -731,8 +741,18 @@ nexttrack_nosave:
     inc track_iter
     ldx track_iter
     cpx midifile + MIDIFile::ntracks
-    bcs end
+    bcs tickcallcnt
     jmp trackloop
+tickcallcnt:
+    ldx #0
+tccloop:
+    inc ymchannels + YMChannel::callcnt,x
+    bne :+
+    dec ymchannels + YMChannel::callcnt,x
+:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc tccloop
 end:
     rts
 .endproc
@@ -863,6 +883,15 @@ end:
     jsr find_ymchannel ; returns the one to use in X
     stx ymchannel_iter ; YM channel
 
+    ; set channel attenuation based on velocity
+    lda cur_velocity
+    eor #$7F
+    lsr
+    lsr
+    tax
+    lda ymchannel_iter
+    jsr AudioAPI::ym_setatten
+
     ; if it's a drum, we handle differently
     lda midichannel_iter
     cmp #9
@@ -943,8 +972,9 @@ drum:
 
 
 .proc do_event_meta: near
-    ; stub, skips over it
+    ; stub, skips over most
     jsr fetch_indirect_byte ; meta type
+    sta tmp1
     jsr get_variable_length ; length
 
     lda variable_length
@@ -956,6 +986,30 @@ drum:
     lda variable_length+3
     sta chunklen+3
 
+    lda tmp1 ; meta-event-type
+    cmp #$2F
+    beq end_of_track
+    cmp #$51
+    beq tempo
+
+    bra end
+end_of_track:
+    ldx track_iter
+    stz miditracks + MIDITrack::playable,x
+    bra end
+tempo:
+    stz midistate + MIDIState::tempo+3
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::tempo+2
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::tempo+1
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::tempo+0
+
+    phy
+    jsr calc_deltas_per_call
+    ply 
+end:
     jsr advance_to_end_of_chunk
     rts
 .endproc
