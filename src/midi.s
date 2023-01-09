@@ -887,7 +887,11 @@ end:
     lda cur_velocity
     eor #$7F
     lsr
-    lsr
+    sec
+    sbc #$10
+    bpl :+
+    lda #0
+:
     tax
     lda ymchannel_iter
     jsr AudioAPI::ym_setatten
@@ -915,11 +919,14 @@ checkinst:
     jsr AudioAPI::ym_loadpatch 
 nopatchload:
     ; trigger the note
+    ldx midichannel_iter
+    lda midichannels + MIDIChannel::pitchbend,x
+
     ldx note_iter
-    jsr AudioAPI::notecon_midi2fm
+    jsr get_pb_kc_kf
 
     lda ymchannel_iter ; YM channel
-    ldy #0
+;    ldy #0
     clc
     jsr AudioAPI::ym_playnote
 
@@ -1088,8 +1095,79 @@ end:
     jmp do_event_stub
 .endproc
 
+; A = PB value
+; X = midi note
+.proc get_pb_kc_kf: near
+    ora #0
+    bmi neg
+    cmp #$7F
+    beq u2
+    cmp #$40
+    bcc even
+    inx
+    bra even
+u2:
+    inx
+    inx
+    ldy #0
+    bra end
+neg:
+    cmp #$C0
+    bcs d1
+d2:
+    dex
+d1:
+    dex
+even:
+    asl
+    asl
+    tay
+end:
+    jmp AudioAPI::notecon_midi2fm
+.endproc
+
 .proc do_event_pitchbend: near
-    jmp do_event_stub
+    and #$0F
+    sta midichannel_iter
+    
+    jsr fetch_indirect_byte ; LSB
+    rol
+    rol
+    and #$01
+    sta tmp1
+    jsr fetch_indirect_byte ; MSB
+    sty midizp ; lay down Y, reset at end of routine
+
+    asl
+    ora tmp1
+    sec
+    sbc #$80
+    ldx midichannel_iter
+    sta midichannels + MIDIChannel::pitchbend,x
+    sta tmp2
+
+    ldx #0
+bendloop:
+    stx tmp1
+    lda ymchannels + YMChannel::midichannel,x
+    cmp midichannel_iter
+    bne blpend
+
+    lda ymchannels + YMChannel::note,x
+    tax
+    lda tmp2
+    jsr get_pb_kc_kf
+
+    lda tmp1
+    jsr AudioAPI::ym_setnote    
+blpend:
+    ldx tmp1
+    inx
+    cpx #YM2151_CHANNELS
+    bcc bendloop
+
+    ldy #0
+    rts
 .endproc
 
 .proc do_event_stub: near
