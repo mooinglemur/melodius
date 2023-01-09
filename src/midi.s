@@ -58,6 +58,7 @@
     deltas_per_call       .word
     calls_per_frame       .byte ; any value besides 2 behaves like 1
     playing               .byte
+    tempochange           .byte ; flag to adjust deltas at the end of the tick
 .endstruct
 
 .struct MIDIChannel
@@ -753,6 +754,12 @@ tccloop:
     inx
     cpx #YM2151_CHANNELS
     bcc tccloop
+
+    ; adjust tempo if it changed on this tick
+    lda midistate + MIDIState::tempochange
+    beq end
+    jsr calc_deltas_per_call
+    stz midistate + MIDIState::tempochange
 end:
     rts
 .endproc
@@ -1039,9 +1046,9 @@ tempo:
     jsr fetch_indirect_byte_decchunk
     sta midistate + MIDIState::tempo+0
 
-    phy
-    jsr calc_deltas_per_call
-    ply 
+    ; handle this at the end of the tick since we need to advance all
+    ; the tracks the same on this tick
+    inc midistate + MIDIState::tempochange
 end:
     jsr advance_to_end_of_chunk
     rts
