@@ -760,10 +760,11 @@ end:
 
 ; finds an empty YM channel or steals one
 ; current strategy is in this order:
-; 0) return channel with the current MIDI channel and note
-; 1) oldest non-playing with current instrument (skipped if MIDI Ch 10)
-; 2) oldest non-playing
-; 3) oldest playing
+; 1) return channel with the current MIDI channel and note
+; 2) oldest non-playing with current instrument (skipped if MIDI Ch 10)
+; 3) oldest non-playing
+; 4) oldest playing in the current MIDI channel
+; 5) oldest playing
 ; input - note to play in note_iter
 ; returns channel to use in X
 ; trashes Y, unfortunately
@@ -841,6 +842,31 @@ nploop:
     inx
     cpx #YM2151_CHANNELS
     bcc nploop
+
+    ldx tmp2
+    bpl end
+
+playingch:
+    ; oldest in same channel
+    stz tmp1 ; framecnt
+    lda #$ff
+    sta tmp2 ; ym channel
+    ldx #0
+pchloop:
+    lda ymchannels + YMChannel::midichannel,x
+    cmp midichannel_iter
+    bne :+
+
+    lda ymchannels + YMChannel::callcnt,x
+    cmp tmp1
+    bcc :+ ; framecnt is less than the saved one
+
+    stx tmp2
+    sta tmp1
+:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc pchloop
 
     ldx tmp2
     bpl end
@@ -1129,7 +1155,7 @@ end:
 .proc do_event_pitchbend: near
     and #$0F
     sta midichannel_iter
-    
+
     jsr fetch_indirect_byte ; LSB
     rol
     rol
