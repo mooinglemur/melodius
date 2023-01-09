@@ -1,3 +1,6 @@
 *.PRG
 obj
 sdcard.img
+*.MID
+*.map
+*.sym

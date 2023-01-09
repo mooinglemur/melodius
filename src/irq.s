@@ -4,6 +4,8 @@
 .export register_handler
 .export deregister_handler
 
+.import midi_playtick
+
 .segment "BSS"
 old_irq_handler:
     .res 2
@@ -39,5 +41,20 @@ deregister_handler:
 
 
 handler:
+    lda X16::Reg::ROMBank
+    pha
+    lda #$0A
+    sta X16::Reg::ROMBank
+
+    lda X16::Reg::RAMBank
+    pha
+    
+    jsr midi_playtick
+
+    pla
+    sta X16::Reg::RAMBank
+
+    pla
+    sta X16::Reg::ROMBank
 
     jmp (old_irq_handler)

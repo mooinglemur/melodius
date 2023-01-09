@@ -14,13 +14,15 @@ SRCS	:= $(wildcard $(SRC)/*.s)
 OBJS    := $(patsubst $(SRC)/%.s,$(OBJ)/%.o,$(SRCS))
 EXE		:= $(call UC,$(PROJECT).PRG)
 SDCARD	:= ./sdcard.img
+MAPFILE := ./$(PROJECT).map
+SYMFILE := ./$(PROJECT).sym
 
 default: all
 
 all: $(EXE)
 
 $(EXE): $(OBJS) $(CONFIG)
-	$(LD) $(LDFLAGS) $(OBJS) -o $@ 
+	$(LD) $(LDFLAGS) $(OBJS) -m $(MAPFILE) -Ln $(SYMFILE) -o $@ 
 
 $(OBJ)/%.o: $(SRC)/%.s | $(OBJ)
 	$(AS) $(ASFLAGS) $< -o $@
@@ -34,11 +36,12 @@ $(SDCARD): $(EXE)
 	parted -s $(SDCARD) mklabel msdos mkpart primary fat32 2048s -- -1
 	mformat -i $(SDCARD)@@1M -v $(call UC,$(PROJECT)) -F
 	mcopy -i $(SDCARD)@@1M -o -m $(EXE) ::
+	mcopy -i $(SDCARD)@@1M -o -m *.MID ::
 
 .PHONY: clean run
 clean:
-	$(RM) $(EXE) $(OBJS) $(SDCARD)
+	$(RM) $(EXE) $(OBJS) $(SDCARD) $(MAPFILE) $(SYMFILE)
 
 run: $(EXE) $(SDCARD)
-	SDL_AUDIODRIVER=alsa x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -run
+	SDL_AUDIODRIVER=alsa x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -scale 2 -run
 	
