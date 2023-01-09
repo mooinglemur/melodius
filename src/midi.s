@@ -24,7 +24,7 @@
     .include "audio.inc"
 .endscope
 
-.define MAX_TRACKS 24
+.define MAX_TRACKS 32
 .define MIDI_CHANNELS 16
 .define YM2151_CHANNELS 8
 
