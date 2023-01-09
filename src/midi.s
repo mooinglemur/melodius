@@ -77,6 +77,7 @@
     callcnt     .byte YM2151_CHANNELS ; calls since change of note (255 max)
     instrument  .byte YM2151_CHANNELS ; patch number, drum = $FF
     undamped    .byte YM2151_CHANNELS ; 0 normally, 1 if releasing damper pedal would release note, so this is only set on release
+    track       .byte YM2151_CHANNELS ; which track did this note come from?
 .endstruct
 
 
@@ -771,7 +772,8 @@ end:
 ; 2) oldest non-playing with current instrument (skipped if MIDI Ch 10)
 ; 3) oldest non-playing
 ; 4) oldest playing in the current MIDI channel
-; 5) oldest playing
+; 5) any playing that have been held at least $FF ticks
+; 6) reject, no channel available
 ; input - note to play in note_iter
 ; returns channel to use in X
 ; trashes Y, unfortunately
@@ -879,15 +881,15 @@ pchloop:
     bpl end
 
 playing:
-    ; oldest in general
+    ; any playing that are at $FF callcnt
     stz tmp1 ; framecnt
     lda #$ff
     sta tmp2 ; ym channel
     ldx #0
 ploop:
     lda ymchannels + YMChannel::callcnt,x
-    cmp tmp1
-    bcc :+ ; framecnt is less than the saved one
+    cmp #$FF
+    bne :+ ; framecnt is less than the saved one
 
     stx tmp2
     sta tmp1
@@ -914,6 +916,9 @@ end:
 
     ; find a channel for this note
     jsr find_ymchannel ; returns the one to use in X
+    cpx #$FF ; we were rejected
+    beq end
+
     stx ymchannel_iter ; YM channel
 
     ; set channel attenuation based on velocity
@@ -978,7 +983,8 @@ set_ymchannel_cont:
     sta ymchannels + YMChannel::note,x
     stz ymchannels + YMChannel::callcnt,x
     stz ymchannels + YMChannel::undamped,x
-
+    lda track_iter
+    sta ymchannels + YMChannel::track,x
 end:
     ldy #0
     rts
@@ -1036,6 +1042,22 @@ drum:
 end_of_track:
     ldx track_iter
     stz miditracks + MIDITrack::playable,x
+    ; release all notes held by this track's events
+    ldx #0
+eotloop:
+    lda ymchannels + YMChannel::track,x
+    cmp track_iter
+    bne :+
+    phx
+    txa
+    jsr AudioAPI::ym_release
+    plx
+:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc eotloop
+
+
     bra end
 tempo:
     stz midistate + MIDIState::tempo+3
