@@ -473,11 +473,15 @@ trackloop:
     bcc trackloop
 
     ; set default tempo of 120 bpm
-    lda #<(500000)
+    ;DEFAULT_TEMPO = 500000
+    DEFAULT_TEMPO = 352941 ; 170 bpm
+
+    
+    lda #<(DEFAULT_TEMPO)
     sta midistate + MIDIState::tempo+0
-    lda #>(500000)
+    lda #>(DEFAULT_TEMPO)
     sta midistate + MIDIState::tempo+1
-    lda #^(500000)
+    lda #^(DEFAULT_TEMPO)
     sta midistate + MIDIState::tempo+2
     stz midistate + MIDIState::tempo+3
 
@@ -740,7 +744,7 @@ end:
 ; 1) oldest non-playing with current instrument (skipped if MIDI Ch 10)
 ; 2) oldest non-playing
 ; 3) oldest playing
-; input - note to play
+; input - note to play in note_iter
 ; returns channel to use in X
 ; trashes Y, unfortunately
 .proc find_ymchannel: near
@@ -895,6 +899,7 @@ set_ymchannel:
     ldx midichannel_iter
     lda midichannels + MIDIChannel::instrument,x
 
+set_ymchannel_cont:
     ldx ymchannel_iter ; YM channel
     sta ymchannels + YMChannel::instrument,x
 
@@ -913,7 +918,9 @@ drum:
     ldx note_iter
 
     jsr AudioAPI::ym_playdrum
-    bra set_ymchannel
+
+    lda #$ff
+    bra set_ymchannel_cont
 
 .endproc
 
@@ -964,7 +971,7 @@ drum:
     sta cur_velocity ; note volume
     sty midizp ; stash Y until the end, we're done reading until the end of this routine
 
-    ldx #YM2151_CHANNELS
+    ldx #0
 ymloop:
     lda ymchannels + YMChannel::midichannel,x
     cmp midichannel_iter
@@ -983,14 +990,21 @@ ymloop:
     sta ymchannels + YMChannel::undamped,x
     bra end
 nopedal:
+    ; mark the note as released
+    stz ymchannels + YMChannel::note,x
+    stz ymchannels + YMChannel::callcnt,x
+
     ; release note
     txa
     jsr AudioAPI::ym_release
+
     bra end
 
+
 nextym:
-    dex
-    bne ymloop
+    inx
+    cpx #YM2151_CHANNELS
+    bcc ymloop
 
 end:
     ldy #0
