@@ -5,8 +5,7 @@
 .export midi_playtick
 .export midi_restart
 
-.export t0delayF, t0delayL, t0delayM, t0delayH, t0delayU
-.export t0bank, t0ptrH, t0ptrL
+.export ymnote, yminst, ymmidi
 
 .import divide40_24
 .import multiply16x16
@@ -23,6 +22,8 @@
 .scope AudioAPI
     .include "audio.inc"
 .endscope
+
+.include "macros.inc"
 
 .define MAX_TRACKS 32
 .define MIDI_CHANNELS 16
@@ -79,6 +80,7 @@
     undamped    .byte YM2151_CHANNELS ; 0 normally, 1 if releasing damper pedal would release note, so this is only set on release
     track       .byte YM2151_CHANNELS ; which track did this note come from?
     pan         .byte YM2151_CHANNELS
+    velocity    .byte YM2151_CHANNELS
 .endstruct
 
 
@@ -116,15 +118,9 @@ tmp1:
 tmp2:
     .res 1 ; assumed free to use at all times but unsafe after jsr
 
-t0delayF := miditracks + MIDITrack::deltaF
-t0delayL := miditracks + MIDITrack::deltaL
-t0delayM := miditracks + MIDITrack::deltaM
-t0delayH := miditracks + MIDITrack::deltaH
-t0delayU := miditracks + MIDITrack::deltaU
-
-t0bank := miditracks + MIDITrack::curbank
-t0ptrH := miditracks + MIDITrack::curoffsetH
-t0ptrL := miditracks + MIDITrack::curoffsetL
+ymnote := ymchannels + YMChannel::note
+yminst := ymchannels + YMChannel::instrument 
+ymmidi := ymchannels + YMChannel::midichannel
 
 .segment "CODE"
 
@@ -151,6 +147,17 @@ fail:
     sec
 end:
 .endscope
+.endmacro
+
+.macro VELOCITY_TO_ATTEN
+    eor #$7F
+    lsr
+    lsr
+    sec
+    sbc #$10
+    bpl :+
+    lda #0
+:
 .endmacro
 
 .proc get_chunklen: near
@@ -624,7 +631,7 @@ trackloop:
     ; is track playable? if not, move on
     lda miditracks + MIDITrack::playable,x
     bne :+
-    jmp nexttrack
+    jmp nexttrack_nosave
 :
 
     ; subtract a delta per call
@@ -797,15 +804,16 @@ end:
 ; 1) return channel with the current MIDI channel and note
 ; 2) oldest non-playing with current instrument (skipped if MIDI Ch 10)
 ; 3) oldest non-playing
-; 4) oldest playing in the current MIDI channel
-; 5) any playing that have been held at least $FF ticks
-; 6) reject, no channel available
+; 4) oldest playing in MIDI channel 10 if held at least $40 ticks
+; 5) oldest playing in the current MIDI channel
+; 6) oldest playing that has been held at least $40 ticks
+; 7) reject, no channel available
 ; input - note to play in note_iter
 ; returns channel to use in X
 ; trashes Y, unfortunately
 .proc find_ymchannel: near
-    ldx #$ff
-    stx tmp2
+    lda #$ff
+    sta tmp2
 
     ldx #0
 samenoteloop:
@@ -825,13 +833,13 @@ samenoteloop:
     bmi :+
     jmp end
 :
-    ; drums skip the first search
+    ; drums skip the next search
     lda midichannel_iter
     cmp #9
     beq nonplaying
 
     ; oldest nonplaying w/ current instrument
-    stz tmp1 ; framecnt
+    stz tmp1 ; callcnt
     lda #$ff
     sta tmp2 ; ym channel
     ldx #0
@@ -846,7 +854,7 @@ npciloop:
 
     lda ymchannels + YMChannel::callcnt,x
     cmp tmp1
-    bcc :+ ; framecnt is less than the saved one
+    bcc :+ ; callcnt is less than the saved one
 
     stx tmp2
     sta tmp1
@@ -856,10 +864,13 @@ npciloop:
     bcc npciloop
 
     ldx tmp2
-    bpl end
+    bmi :+
+    jmp end
+:
+
 nonplaying:
     ; oldest nonplaying
-    stz tmp1 ; framecnt
+    stz tmp1 ; callcnt
     lda #$ff
     sta tmp2 ; ym channel
     ldx #0
@@ -869,7 +880,7 @@ nploop:
 
     lda ymchannels + YMChannel::callcnt,x
     cmp tmp1
-    bcc :+ ; framecnt is less than the saved one
+    bcc :+ ; callcnt is less than the saved one
 
     stx tmp2
     sta tmp1
@@ -881,9 +892,42 @@ nploop:
     ldx tmp2
     bpl end
 
+
+playing10:
+    ; oldest in MIDI channel 10 held for over $40 ticks
+    stz tmp1 ; callcnt
+    lda #$ff
+    sta tmp2 ; ym channel
+    ldx #0
+p10loop:
+    lda ymchannels + YMChannel::midichannel,x
+    cmp #9 ; MIDI channel 10
+    bne :+
+
+
+    lda ymchannels + YMChannel::callcnt,x
+    cmp #$40
+    bcc :+ ; callcnt is less than $40
+
+    cmp tmp1
+    bcc :+ ; callcnt is less than the saved one
+
+    stx tmp2
+    sta tmp1
+:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc p10loop
+
+    ldx tmp2
+    bpl end
+
+
+
+
 playingch:
-    ; oldest in same channel
-    stz tmp1 ; framecnt
+    ; oldest in same MIDI channel
+    stz tmp1 ; callcnt
     lda #$ff
     sta tmp2 ; ym channel
     ldx #0
@@ -894,7 +938,7 @@ pchloop:
 
     lda ymchannels + YMChannel::callcnt,x
     cmp tmp1
-    bcc :+ ; framecnt is less than the saved one
+    bcc :+ ; callcnt is less than the saved one
 
     stx tmp2
     sta tmp1
@@ -907,15 +951,18 @@ pchloop:
     bpl end
 
 playing:
-    ; any playing that are at $FF callcnt
-    stz tmp1 ; framecnt
+    ; oldest playing but only older than $40 calls
+    stz tmp1 ; callcnt
     lda #$ff
     sta tmp2 ; ym channel
     ldx #0
 ploop:
     lda ymchannels + YMChannel::callcnt,x
-    cmp #$FF
-    bne :+ ; framecnt is less than the saved one
+    cmp #$40
+    bcc :+ ; callcnt is less than $40
+
+    cmp tmp1
+    bcc :+ ; callcnt is less than the current one
 
     stx tmp2
     sta tmp1
@@ -938,6 +985,17 @@ end:
     sta note_iter ; note value
     jsr fetch_indirect_byte
     sta cur_velocity ; note volume
+
+    ora #0
+    bne :+
+    ; this is a note_off in disguise
+    jsr rewind_indirect_byte
+    jsr rewind_indirect_byte
+    lda midichannel_iter
+    jmp do_event_note_off
+:
+
+
     sty midizp ; stash Y until the end, we're done reading until the end of this routine
 
     ; find a channel for this note
@@ -951,23 +1009,30 @@ end:
 
     ; set channel attenuation based on velocity
     lda cur_velocity
+    sta ymchannels + YMChannel::velocity,x
+
+    VELOCITY_TO_ATTEN
+
+    sta tmp1
+    ldx midichannel_iter
+    lda midichannels + MIDIChannel::volume,x
     eor #$7F
     lsr
     lsr
-    sec
-    sbc #$10
-    bpl :+
-    lda #0
-:
+    clc
+    adc tmp1
+
     tax
+    API_BORDER
     lda ymchannel_iter
     jsr AudioAPI::ym_setatten
+    MIDI_BORDER
 
     ; if it's a drum, we handle differently
     lda midichannel_iter
     cmp #9
-    beq drum
-
+    bne checkinst
+    jmp drum
 
 checkinst:
     ; check currently-loaded instrument
@@ -975,15 +1040,18 @@ checkinst:
     lda midichannels + MIDIChannel::instrument,x
     ldx ymchannel_iter
     cmp ymchannels + YMChannel::instrument,x
-    
+
+; something is bugged, and we get drum patches instead of instruments   
 ;    beq nopatchload ; if instruments are the same, skip load
 
     ; swap A and X
     tax ; instrument
+    API_BORDER
     lda ymchannel_iter ; YM channel
     
     sec
     jsr AudioAPI::ym_loadpatch 
+    MIDI_BORDER
 nopatchload:
     ; trigger the note
     ldx midichannel_iter
@@ -992,10 +1060,12 @@ nopatchload:
     ldx note_iter
     jsr get_pb_kc_kf
 
+    API_BORDER
     lda ymchannel_iter ; YM channel
 ;    ldy #0
     clc
     jsr AudioAPI::ym_playnote
+    MIDI_BORDER
 
 check_set_pan:
     ldx midichannel_iter
@@ -1008,8 +1078,10 @@ check_set_pan:
     sta ymchannels + YMChannel::pan,x
 
     tax
+    API_BORDER
     lda ymchannel_iter
     jsr AudioAPI::ym_setpan
+    MIDI_BORDER
     
 :
 
@@ -1034,10 +1106,12 @@ end:
     ldy #0
     rts
 drum:
+    API_BORDER
     txa ; YM channel to A
     ldx note_iter
 
     jsr AudioAPI::ym_playdrum
+    MIDI_BORDER
 
     lda #3
     ldx ymchannel_iter
@@ -1047,8 +1121,10 @@ drum:
     sta ymchannels + YMChannel::pan,x
 
     ldx #3
+    API_BORDER
     lda ymchannel_iter
     jsr AudioAPI::ym_setpan
+    MIDI_BORDER
 :
 
     lda #$ff
@@ -1107,9 +1183,12 @@ eotloop:
     bne :+
     stz ymchannels + YMChannel::note,x
     stz ymchannels + YMChannel::callcnt,x
+    stz ymchannels + YMChannel::undamped,x
     phx
+    API_BORDER
     txa
     jsr AudioAPI::ym_release
+    MIDI_BORDER
     plx
 :
     inx
@@ -1170,8 +1249,10 @@ nopedal:
     stz ymchannels + YMChannel::callcnt,x
 
     ; release note
+    API_BORDER
     txa
     jsr AudioAPI::ym_release
+    MIDI_BORDER
 
     bra end
 
@@ -1213,28 +1294,110 @@ end:
 
     sty midizp
 
+    cmp #$07 ; Volume
+    beq volume
+
     cmp #$0A ; Pan MSB
-    beq pan
+    bne :+
+    jmp pan
+:
+
+    cmp #$40 ; Damper/sustain pedal
+    beq damper
 
     cmp #$7F ; All notes off
-    beq all_notes_off
-
+    bne :+
+    jmp all_notes_off
+:
 
 end:
     ldy #0
     rts
+damper:
+    lda tmp1
+    rol
+    rol
+    and #1
+    ldx midichannel_iter
+    sta midichannels + MIDIChannel::damper,x
+    ora #0
+    bne end
+    
+    ; damper changed to 0, release notes if they should be
+    ldx #0
+@rellp:
+    lda ymchannels + YMChannel::midichannel,x
+    cmp midichannel_iter
+    bne @rlend
+
+    lda ymchannels + YMChannel::undamped,x
+    beq @rlend
+
+    stz ymchannels + YMChannel::undamped,x
+    stz ymchannels + YMChannel::note,x
+    stz ymchannels + YMChannel::callcnt,x
+    phx
+    API_BORDER
+    txa
+    jsr AudioAPI::ym_release
+    MIDI_BORDER
+    plx
+@rlend:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc @rellp
+
+    bra end
+volume:
+    ldx midichannel_iter
+    lda tmp1
+    sta midichannels + MIDIChannel::volume,x
+    ; apply volumes to existing notes
+    ldx #0
+@vollp:
+    lda ymchannels + YMChannel::midichannel,x
+    cmp midichannel_iter
+    bne @vlend
+
+    lda ymchannels + YMChannel::velocity,x
+
+    VELOCITY_TO_ATTEN
+    
+    sta tmp2
+    lda tmp1
+    eor #$7F
+    lsr
+    lsr
+    clc
+    adc tmp2
+
+    phx
+    pha
+    API_BORDER
+    txa
+    plx
+    jsr AudioAPI::ym_setatten
+    MIDI_BORDER
+    plx
+
+@vlend:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc @vollp
+     
+
 pan:
     ldx midichannel_iter
     lda tmp1
-    cmp #$44
+    cmp #$50
     bcs @right
-    cmp #$3C
+    cmp #$30
     bcc @left
 
     lda #3
 @setpan:
     sta midichannels + MIDIChannel::pan,x
-    bra end
+    jmp end
 @left:
     lda #1
     bra @setpan
@@ -1254,17 +1417,20 @@ all_notes_off:
 
     stz ymchannels + YMChannel::callcnt,x
     stz ymchannels + YMChannel::note,x
+    stz ymchannels + YMChannel::undamped,x
 
     phx
+    API_BORDER
     txa
     jsr AudioAPI::ym_release
+    MIDI_BORDER
     plx
 :
     inx
     cpx #YM2151_CHANNELS
     bcc @anoloop    
     
-    bra end
+    jmp end
 .endproc
 
 .proc do_event_ch_aft: near
@@ -1299,7 +1465,10 @@ even:
     asl
     tay
 end:
-    jmp AudioAPI::notecon_midi2fm
+    API_BORDER
+    jsr AudioAPI::notecon_midi2fm
+    MIDI_BORDER
+    rts
 .endproc
 
 .proc do_event_pitchbend: near
@@ -1334,8 +1503,10 @@ bendloop:
     lda tmp2
     jsr get_pb_kc_kf
 
+    API_BORDER
     lda tmp1
     jsr AudioAPI::ym_setnote    
+    MIDI_BORDER
 blpend:
     ldx tmp1
     inx

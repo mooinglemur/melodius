@@ -19,8 +19,10 @@ start:
 .import midi_parse
 .import midi_play
 .import midi_restart
-.import t0delayF, t0delayL, t0delayM, t0delayH, t0delayU
-.import t0bank, t0ptrH, t0ptrL
+
+.import ymnote, yminst, ymmidi
+
+.include "macros.inc"
 
 main:
     lda #1
@@ -28,7 +30,25 @@ main:
     ldy #$A0
 
     jsr midi_parse
-    bcs error
+    bcc :+
+    jmp error
+:
+
+    ; set up raster bar thingy
+    lda Vera::Reg::Ctrl
+    ora #2
+    sta Vera::Reg::Ctrl
+
+
+    lda #($A0 - 3)
+    sta Vera::Reg::DCHStop
+
+    lda Vera::Reg::Ctrl
+    and #%11111101
+    sta Vera::Reg::Ctrl
+
+
+
 
     jsr midi_restart
 
@@ -38,31 +58,90 @@ main:
     jsr register_handler
 
 endless:
+    DONE_BORDER
     wai
-    lda t0delayU
+    DONE_BORDER
+    
+    lda ymnote
     jsr print_hex
-    lda t0delayH
+    lda ymnote+1
     jsr print_hex
-    lda t0delayM
+    lda ymnote+2
     jsr print_hex
-    lda t0delayL
+    lda ymnote+3
     jsr print_hex
-    lda t0delayF
+    lda ymnote+4
     jsr print_hex
+    lda ymnote+5
+    jsr print_hex
+    lda ymnote+6
+    jsr print_hex
+    lda ymnote+7
+    jsr print_hex
+
     lda #$20
     jsr X16::Kernal::CHROUT
-    lda t0bank
+
+    lda yminst
     jsr print_hex
-    lda t0ptrH
+    lda yminst+1
     jsr print_hex
-    lda t0ptrL
+    lda yminst+2
     jsr print_hex
+    lda yminst+3
+    jsr print_hex
+    lda yminst+4
+    jsr print_hex
+    lda yminst+5
+    jsr print_hex
+    lda yminst+6
+    jsr print_hex
+    lda yminst+7
+    jsr print_hex
+
+    lda #$20
+    jsr X16::Kernal::CHROUT
+
+    lda ymmidi
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+    lda ymmidi+1
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+    lda ymmidi+2
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+    lda ymmidi+3
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+    lda ymmidi+4
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+    lda ymmidi+5
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+    lda ymmidi+6
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+    lda ymmidi+7
+    jsr byte_to_hex
+    txa
+    jsr X16::Kernal::CHROUT
+
+
 
     lda #$0D
     jsr X16::Kernal::CHROUT
 
 
-    bra endless
+    jmp endless
 
     jsr deregister_handler
     rts

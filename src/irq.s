@@ -11,6 +11,8 @@ old_irq_handler:
     .res 2
 .segment "CODE"
 
+.include "macros.inc"
+
 register_handler:
     php
     sei
@@ -24,6 +26,13 @@ register_handler:
     lda #>handler
     sta X16::Vec::IRQVec+1
 
+    ; use LINE IRQ instead of VBLANK
+    lda Vera::Reg::IEN
+    and #$FC
+    ora #$02
+    sta Vera::Reg::IEN
+    stz Vera::Reg::IRQLineL
+
     plp
     rts
 
@@ -35,6 +44,12 @@ deregister_handler:
     sta X16::Vec::IRQVec
     lda old_irq_handler+1
     sta X16::Vec::IRQVec+1
+
+    ; use VBLANK again
+    lda Vera::Reg::IEN
+    and #$FC
+    ora #$01
+    sta Vera::Reg::IEN
 
     plp
     rts
@@ -49,6 +64,8 @@ handler:
     lda X16::Reg::RAMBank
     pha
     
+    MIDI_BORDER
+
     jsr midi_playtick
 
     pla
@@ -56,5 +73,10 @@ handler:
 
     pla
     sta X16::Reg::ROMBank
+
+    KERNAL_BORDER
+
+    lda #2
+    sta Vera::Reg::ISR
 
     jmp (old_irq_handler)

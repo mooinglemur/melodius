@@ -42,6 +42,9 @@ $(SDCARD): $(EXE)
 clean:
 	$(RM) $(EXE) $(OBJS) $(SDCARD) $(MAPFILE) $(SYMFILE)
 
+box: $(EXE) $(SDCARD)
+	SDL_AUDIODRIVER=alsa box16 -sdcard $(SDCARD) -prg $(EXE) -run
+
 run: $(EXE) $(SDCARD)
 	SDL_AUDIODRIVER=alsa x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -scale 2 -run
 	
