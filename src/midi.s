@@ -78,6 +78,7 @@
     instrument  .byte YM2151_CHANNELS ; patch number, drum = $FF
     undamped    .byte YM2151_CHANNELS ; 0 normally, 1 if releasing damper pedal would release note, so this is only set on release
     track       .byte YM2151_CHANNELS ; which track did this note come from?
+    pan         .byte YM2151_CHANNELS
 .endstruct
 
 
@@ -429,7 +430,41 @@ error:
 
 
 .proc midi_restart: near
-    
+    ; We're resetting the instruments to $FF since we don't know
+    ; What patches are loaded into the YM2151's channels
+    ldx #0
+    lda #$FF
+iloop:
+    sta ymchannels + YMChannel::instrument,x
+    stz ymchannels + YMChannel::note,x
+    stz ymchannels + YMChannel::callcnt,x
+    stz ymchannels + YMChannel::undamped,x
+    stz ymchannels + YMChannel::pan,x
+
+    inx
+    cpx #YM2151_CHANNELS
+    bcc iloop
+
+    ; We're resetting the controller state on all the MIDI channels
+    ; to defaults
+    ldx #0
+mloop:
+    lda #$7F
+    stz midichannels + MIDIChannel::modwheel,x
+    sta midichannels + MIDIChannel::volume,x
+    stz midichannels + MIDIChannel::expression,x
+    stz midichannels + MIDIChannel::damper,x
+    stz midichannels + MIDIChannel::pitchbend,x
+    stz midichannels + MIDIChannel::instrument,x
+    lda #3
+    sta midichannels + MIDIChannel::pan,x
+
+    inx
+    cpx #MIDI_CHANNELS
+    bcc mloop
+
+
+
     stz track_iter
 trackloop:
     ldx track_iter
@@ -567,15 +602,6 @@ save_deltas:
 
 .proc midi_play: near
     sta midistate + MIDIState::playing
-    ; We're resetting the instruments to $FF since we don't know
-    ; What patches are loaded into the YM2151's channels
-    ldx #0
-    lda #$FF
-iloop:
-    sta ymchannels + YMChannel::instrument,x
-    inx
-    cpx #YM2151_CHANNELS
-    bcc iloop
     rts
 .endproc
 
@@ -917,13 +943,16 @@ end:
     ; find a channel for this note
     jsr find_ymchannel ; returns the one to use in X
     cpx #$FF ; we were rejected
-    beq end
+    bne :+
+    jmp end
+:
 
     stx ymchannel_iter ; YM channel
 
     ; set channel attenuation based on velocity
     lda cur_velocity
     eor #$7F
+    lsr
     lsr
     sec
     sbc #$10
@@ -947,7 +976,7 @@ checkinst:
     ldx ymchannel_iter
     cmp ymchannels + YMChannel::instrument,x
     
-    beq nopatchload ; if instruments are the same, skip load
+;    beq nopatchload ; if instruments are the same, skip load
 
     ; swap A and X
     tax ; instrument
@@ -967,6 +996,22 @@ nopatchload:
 ;    ldy #0
     clc
     jsr AudioAPI::ym_playnote
+
+check_set_pan:
+    ldx midichannel_iter
+    lda midichannels + MIDIChannel::pan,x
+
+    ldx ymchannel_iter
+    cmp ymchannels + YMChannel::pan,x
+
+    beq :+
+    sta ymchannels + YMChannel::pan,x
+
+    tax
+    lda ymchannel_iter
+    jsr AudioAPI::ym_setpan
+    
+:
 
 set_ymchannel:
     ; set the YMChannel params for this fresh note
@@ -993,6 +1038,18 @@ drum:
     ldx note_iter
 
     jsr AudioAPI::ym_playdrum
+
+    lda #3
+    ldx ymchannel_iter
+    cmp ymchannels + YMChannel::pan,x
+    
+    beq :+
+    sta ymchannels + YMChannel::pan,x
+
+    ldx #3
+    lda ymchannel_iter
+    jsr AudioAPI::ym_setpan
+:
 
     lda #$ff
     bra set_ymchannel_cont
@@ -1048,6 +1105,8 @@ eotloop:
     lda ymchannels + YMChannel::track,x
     cmp track_iter
     bne :+
+    stz ymchannels + YMChannel::note,x
+    stz ymchannels + YMChannel::callcnt,x
     phx
     txa
     jsr AudioAPI::ym_release
@@ -1143,7 +1202,69 @@ end:
 .endproc
 
 .proc do_event_controller: near
-    jmp do_event_stub
+    and #$0F
+    sta midichannel_iter
+
+    jsr fetch_indirect_byte
+    pha
+    jsr fetch_indirect_byte
+    sta tmp1
+    pla
+
+    sty midizp
+
+    cmp #$0A ; Pan MSB
+    beq pan
+
+    cmp #$7F ; All notes off
+    beq all_notes_off
+
+
+end:
+    ldy #0
+    rts
+pan:
+    ldx midichannel_iter
+    lda tmp1
+    cmp #$44
+    bcs @right
+    cmp #$3C
+    bcc @left
+
+    lda #3
+@setpan:
+    sta midichannels + MIDIChannel::pan,x
+    bra end
+@left:
+    lda #1
+    bra @setpan
+@right:
+    lda #2
+    bra @setpan
+
+all_notes_off:
+    ldx #0
+@anoloop:
+    lda ymchannels + YMChannel::midichannel,x
+    cmp midichannel_iter
+    bne :+
+
+    lda ymchannels + YMChannel::note,x
+    beq :+ ; released already
+
+    stz ymchannels + YMChannel::callcnt,x
+    stz ymchannels + YMChannel::note,x
+
+    phx
+    txa
+    jsr AudioAPI::ym_release
+    plx
+:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc @anoloop    
+    
+    bra end
 .endproc
 
 .proc do_event_ch_aft: near
