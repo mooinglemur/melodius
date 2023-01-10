@@ -1,6 +1,6 @@
 UC = $(shell echo '$1' | tr '[:lower:]' '[:upper:]')
 
-PROJECT	:= xmidi
+PROJECT	:= melodius
 AS		:= ca65
 LD		:= ld65
 MKDIR	:= mkdir -p

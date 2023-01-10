@@ -1,2 +1,5 @@
-# xmidi
-MIDI playback via X16 audio API
+# Melodius
+
+Music file playback via X16 audio API
+
+Supports: MIDI
