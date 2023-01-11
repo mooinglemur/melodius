@@ -20,7 +20,8 @@ start:
 .import midi_play
 .import midi_restart
 
-.import ymnote, yminst, ymmidi
+.import setup_sprites
+.import do_midi_sprites
 
 .include "macros.inc"
 
@@ -47,8 +48,7 @@ main:
     and #%11111101
     sta Vera::Reg::Ctrl
 
-
-
+    jsr setup_sprites
 
     jsr midi_restart
 
@@ -62,84 +62,7 @@ endless:
     wai
     DONE_BORDER
     
-    lda ymnote
-    jsr print_hex
-    lda ymnote+1
-    jsr print_hex
-    lda ymnote+2
-    jsr print_hex
-    lda ymnote+3
-    jsr print_hex
-    lda ymnote+4
-    jsr print_hex
-    lda ymnote+5
-    jsr print_hex
-    lda ymnote+6
-    jsr print_hex
-    lda ymnote+7
-    jsr print_hex
-
-    lda #$20
-    jsr X16::Kernal::CHROUT
-
-    lda yminst
-    jsr print_hex
-    lda yminst+1
-    jsr print_hex
-    lda yminst+2
-    jsr print_hex
-    lda yminst+3
-    jsr print_hex
-    lda yminst+4
-    jsr print_hex
-    lda yminst+5
-    jsr print_hex
-    lda yminst+6
-    jsr print_hex
-    lda yminst+7
-    jsr print_hex
-
-    lda #$20
-    jsr X16::Kernal::CHROUT
-
-    lda ymmidi
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-    lda ymmidi+1
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-    lda ymmidi+2
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-    lda ymmidi+3
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-    lda ymmidi+4
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-    lda ymmidi+5
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-    lda ymmidi+6
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-    lda ymmidi+7
-    jsr byte_to_hex
-    txa
-    jsr X16::Kernal::CHROUT
-
-
-
-    lda #$0D
-    jsr X16::Kernal::CHROUT
-
+    jsr do_midi_sprites
 
     jmp endless
 

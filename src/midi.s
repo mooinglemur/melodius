@@ -5,7 +5,7 @@
 .export midi_playtick
 .export midi_restart
 
-.export ymnote, yminst, ymmidi
+.export ymnote, yminst, ymmidi, midibend
 
 .import divide40_24
 .import multiply16x16
@@ -121,6 +121,7 @@ tmp2:
 ymnote := ymchannels + YMChannel::note
 yminst := ymchannels + YMChannel::instrument 
 ymmidi := ymchannels + YMChannel::midichannel
+midibend := midichannels + MIDIChannel::pitchbend
 
 .segment "CODE"
 
