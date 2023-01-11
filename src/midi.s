@@ -1041,9 +1041,8 @@ checkinst:
     lda midichannels + MIDIChannel::instrument,x
     ldx ymchannel_iter
     cmp ymchannels + YMChannel::instrument,x
-
-; something is bugged, and we get drum patches instead of instruments   
-;    beq nopatchload ; if instruments are the same, skip load
+   
+    beq nopatchload ; if instruments are the same, skip load
 
     ; swap A and X
     tax ; instrument
@@ -1108,7 +1107,7 @@ end:
     rts
 drum:
     API_BORDER
-    txa ; YM channel to A
+    lda ymchannel_iter
     ldx note_iter
 
     jsr AudioAPI::ym_playdrum

@@ -10,6 +10,8 @@ iterator:
     .res 1
 tmp1:
     .res 1
+tmp2:
+    .res 1
 pitchdown:
     .res 1
 
@@ -31,7 +33,9 @@ pitchdown:
     ldx iterator
 sploop:
     lda ymnote,x
-    beq hideit
+    bne :+
+    jmp hideit
+:
 
     lda ymmidi,x
     tay
@@ -51,6 +55,8 @@ sploop:
     asl
 
     sta tmp1
+    stz tmp2
+
     lda midibend,y
     beq endbend
 
@@ -58,23 +64,37 @@ sploop:
 
     ldy #2
     sty pitchdown
+
+    cmp #$C0
+    bcc hardbend
+    bra softbend
 contbend:
-;    cmp #$04
-;    bcc endbend
-
-;    cmp #$FC
-;    bcs endbend
-
+    cmp #$40
+    bcs hardbend
+softbend:
     lda tmp1
     clc
     adc #64
     sta tmp1
+    lda #0
+    adc #0
+    sta tmp2
+    bra endbend
+hardbend:
+    lda tmp1
+    clc
+    adc #128
+    sta tmp1
+    lda #0
+    adc #0
+    sta tmp2
 endbend:
     lda tmp1
     sta Vera::Reg::Data0
 
     ; no high bits, mode 0
-    stz Vera::Reg::Data0
+    lda tmp2
+    sta Vera::Reg::Data0
 
     ; multiply MIDI channel by 16
     lda ymmidi,x
@@ -160,28 +180,13 @@ end:
     sta iterator
 lineloop:    
     
-    ; top 7 lines are transparent
-    ldx #(8*7)
+    ldx #0
 :
-    stz Vera::Reg::Data0
-    dex
-    bne :-
-
-    ; next 2 lines are solid
-    lda iterator
-    ldx #(8*2)
-:
+    lda note,x
+    and iterator
     sta Vera::Reg::Data0
-    dex
-    bne :-
-
-    ; bottom 7 lines are transparent
-    ldx #(8*7)
-:
-    stz Vera::Reg::Data0
-    dex
-    bne :-
-
+    inx
+    bpl :- ; 128
     
     lda iterator
     clc
@@ -199,76 +204,55 @@ lineloop:
     bpl :- ; 128 of them
 
 
-
 ; now do pitch bendy things
     lda #$11
     sta iterator
-bendloop:    
+bendloop1:
     
-    ; top 4 lines are transparent
-    ldx #(8*4)
+    ldx #0
 :
-    stz Vera::Reg::Data0
-    dex
-    bne :-
+    lda bend_1,x
+    and iterator
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128
 
-    ; peak of bend (3)
-    lda iterator
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-
-    ; (2)
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-
-    ; (1)
-    stz Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    stz Vera::Reg::Data0
-
-    ; (0)
-    sta Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    stz Vera::Reg::Data0
-    sta Vera::Reg::Data0
-    sta Vera::Reg::Data0
-
-    ; bottom 7 lines are transparent
-    ldx #(8*7)
-:
-    stz Vera::Reg::Data0
-    dex
-    bne :-
-
-    
     lda iterator
     clc
     adc #$11
     sta iterator
     cmp #$10 ; first overflow should land here
-    bne bendloop
+    bne bendloop1
 
 
+    lda #$11
+    sta iterator
+
+; blank sprite
+    ldx #0
+:
+    lda note_blocked,x
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128 of them
+
+
+bendloop2:
+    
+    ldx #0
+:
+    lda bend_2,x
+    and iterator
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128
+
+    lda iterator
+    clc
+    adc #$11
+    sta iterator
+    cmp #$10 ; first overflow should land here
+    bne bendloop2
 
 
     ; enable sprites
@@ -277,6 +261,61 @@ bendloop:
     sta Vera::Reg::DCVideo
 
     rts
+
+bend_1:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$FF,$FF,$FF,$FF,$00,$00
+    .byte $0F,$FF,$FF,$00,$00,$FF,$FF,$F0
+    .byte $FF,$F0,$00,$00,$00,$00,$0F,$FF
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+
+bend_2:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$0F,$F0,$00,$00,$00
+    .byte $00,$00,$00,$FF,$FF,$00,$00,$00
+    .byte $00,$00,$0F,$F0,$0F,$F0,$00,$00
+    .byte $00,$FF,$FF,$00,$00,$FF,$FF,$00
+    .byte $FF,$F0,$F0,$00,$00,$0F,$0F,$FF
+    .byte $FF,$00,$00,$00,$00,$00,$0F,$FF
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+
+note:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF
+    .byte $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+
 note_blocked:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$01,$11,$11,$11,$00,$00
@@ -293,6 +332,6 @@ note_blocked:
     .byte $00,$11,$11,$00,$00,$00,$11,$10
     .byte $00,$01,$11,$00,$00,$01,$11,$00
     .byte $00,$00,$11,$11,$11,$11,$10,$00
-    .byte $00,$00,$01,$11,$11,$11,$00,$00                                           
+    .byte $00,$00,$01,$11,$11,$11,$00,$00
 
 .endproc
