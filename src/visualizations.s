@@ -1,6 +1,6 @@
 .include "x16.inc"
 
-.import ymnote, yminst, ymmidi, midibend
+.import ymnote, yminst, ymmidi, midibend, ympan
 .export do_midi_sprites
 .export setup_sprites
 
@@ -13,6 +13,8 @@ tmp1:
 tmp2:
     .res 1
 pitchdown:
+    .res 1
+panright:
     .res 1
 
 
@@ -41,11 +43,13 @@ sploop:
     tay
 
     stz pitchdown
+    stz panright
+
     lda yminst,x
     lsr
     lsr
     lsr
-    lsr
+    and #$0F
     inc
     cmp #$10
     bne :+
@@ -57,9 +61,28 @@ sploop:
     sta tmp1
     stz tmp2
 
+    cpy #9
+    beq endbend ; channel 10, don't pan or pitch
+
+chkpan:
+    lda ympan,x
+    cmp #3
+    beq chkpitch
+
+    cmp #1
+    beq :+
+    inc panright
+:
+    lda tmp1
+    clc
+    adc #64
+    sta tmp1
+    lda #0
+    adc #0
+    sta tmp2
+chkpitch:
     lda midibend,y
     beq endbend
-
     bpl contbend
 
     ldy #2
@@ -68,19 +91,11 @@ sploop:
     cmp #$C0
     bcc hardbend
     bra softbend
+
 contbend:
     cmp #$40
     bcs hardbend
 softbend:
-    lda tmp1
-    clc
-    adc #64
-    sta tmp1
-    lda #0
-    adc #0
-    sta tmp2
-    bra endbend
-hardbend:
     lda tmp1
     clc
     adc #128
@@ -88,6 +103,9 @@ hardbend:
     lda #0
     adc #0
     sta tmp2
+    bra endbend
+hardbend:
+    inc tmp2
 endbend:
     lda tmp1
     sta Vera::Reg::Data0
@@ -103,7 +121,7 @@ endbend:
     asl
     asl
     
-    ; add #320 and drop the X
+    ; add #320 and drop the X coord
     clc
     adc #<(320)
     sta Vera::Reg::Data0
@@ -111,7 +129,7 @@ endbend:
     adc #0
     sta Vera::Reg::Data0
 
-    ; note is Y
+    ; note is Y coord
     lda #255
     sec
     sbc ymnote,x
@@ -129,6 +147,7 @@ endbend:
     ; set the Z depth
     lda #$0C
     ora pitchdown
+    ora panright
     sta Vera::Reg::Data0
 
     ; set 16x16
@@ -178,7 +197,7 @@ end:
     ; These next 15 are gonna be straight lines in various indexes
     lda #$11
     sta iterator
-lineloop:    
+noteloop:    
     
     ldx #0
 :
@@ -193,7 +212,42 @@ lineloop:
     adc #$11
     sta iterator
     cmp #$10 ; first overflow should land here
-    bne lineloop
+    bne noteloop
+
+
+; blank sprite
+    ldx #0
+:
+    lda note_blocked,x
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128 of them
+
+    lda #$11
+    sta iterator
+notearrowloop:
+    
+    ldx #0
+:
+    lda note_arrow,x
+    and iterator
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128
+
+    lda iterator
+    clc
+    adc #$11
+    sta iterator
+    cmp #$10 ; first overflow should land here
+    bne notearrowloop
+
+
+    ; enable sprites
+    lda Vera::Reg::DCVideo
+    ora #$40
+    sta Vera::Reg::DCVideo
+
 
 ; blank sprite
     ldx #0
@@ -225,8 +279,33 @@ bendloop1:
     bne bendloop1
 
 
+; blank sprite
+    ldx #0
+:
+    lda note_blocked,x
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128 of them
+
     lda #$11
     sta iterator
+bendloop1arrow:
+    
+    ldx #0
+:
+    lda bend_1_arrow,x
+    and iterator
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128
+
+    lda iterator
+    clc
+    adc #$11
+    sta iterator
+    cmp #$10 ; first overflow should land here
+    bne bendloop1arrow
+
 
 ; blank sprite
     ldx #0
@@ -236,7 +315,8 @@ bendloop1:
     inx
     bpl :- ; 128 of them
 
-
+    lda #$11
+    sta iterator
 bendloop2:
     
     ldx #0
@@ -255,12 +335,43 @@ bendloop2:
     bne bendloop2
 
 
+; blank sprite
+    ldx #0
+:
+    lda note_blocked,x
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128 of them
+
+    lda #$11
+    sta iterator
+bendloop2arrow:
+    
+    ldx #0
+:
+    lda bend_2_arrow,x
+    and iterator
+    sta Vera::Reg::Data0
+    inx
+    bpl :- ; 128
+
+    lda iterator
+    clc
+    adc #$11
+    sta iterator
+    cmp #$10 ; first overflow should land here
+    bne bendloop2arrow
+
+
+
     ; enable sprites
     lda Vera::Reg::DCVideo
     ora #$40
     sta Vera::Reg::DCVideo
 
+
     rts
+
 
 bend_1:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
@@ -280,6 +391,25 @@ bend_1:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
 
+bend_1_arrow:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$FF,$00,$FF,$FF,$00,$00,$00
+    .byte $0F,$F0,$FF,$FF,$FF,$FF,$00,$00
+    .byte $FF,$FF,$FF,$00,$00,$FF,$FF,$F0
+    .byte $FF,$F0,$00,$00,$00,$00,$0F,$FF
+    .byte $0F,$F0,$00,$00,$00,$00,$00,$00
+    .byte $00,$FF,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+
+
 bend_2:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
@@ -288,7 +418,7 @@ bend_2:
     .byte $00,$00,$00,$FF,$FF,$00,$00,$00
     .byte $00,$00,$0F,$F0,$0F,$F0,$00,$00
     .byte $00,$FF,$FF,$00,$00,$FF,$FF,$00
-    .byte $FF,$F0,$F0,$00,$00,$0F,$0F,$FF
+    .byte $FF,$FF,$F0,$00,$00,$0F,$FF,$FF
     .byte $FF,$00,$00,$00,$00,$00,$0F,$FF
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
@@ -297,6 +427,25 @@ bend_2:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
+
+bend_2_arrow:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$0F,$F0,$00,$00,$00
+    .byte $00,$00,$00,$FF,$FF,$00,$00,$00
+    .byte $00,$FF,$0F,$F0,$0F,$F0,$00,$00
+    .byte $0F,$FF,$FF,$00,$00,$FF,$FF,$00
+    .byte $FF,$FF,$F0,$00,$00,$0F,$FF,$FF
+    .byte $FF,$00,$00,$00,$00,$00,$0F,$FF
+    .byte $0F,$F0,$00,$00,$00,$00,$00,$00
+    .byte $00,$FF,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+
 
 note:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
@@ -315,6 +464,25 @@ note:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
+
+note_arrow:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$FF,$00,$00,$00,$00,$00,$00
+    .byte $0F,$F0,$00,$00,$00,$00,$00,$00
+    .byte $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF
+    .byte $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF
+    .byte $0F,$F0,$00,$00,$00,$00,$00,$00
+    .byte $00,$FF,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00
+
 
 note_blocked:
     .byte $00,$00,$00,$00,$00,$00,$00,$00

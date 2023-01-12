@@ -4,8 +4,9 @@
 .export midi_play
 .export midi_playtick
 .export midi_restart
+.export midi_is_playing
 
-.export ymnote, yminst, ymmidi, midibend
+.export ymnote, yminst, ymmidi, midibend, ympan
 
 .import divide40_24
 .import multiply16x16
@@ -113,6 +114,8 @@ cur_velocity:
     .res 1
 variable_length:
     .res 4
+tracks_playing:
+    .res 1
 tmp1:
     .res 1 ; assumed free to use at all times but unsafe after jsr
 tmp2:
@@ -121,6 +124,7 @@ tmp2:
 ymnote := ymchannels + YMChannel::note
 yminst := ymchannels + YMChannel::instrument 
 ymmidi := ymchannels + YMChannel::midichannel
+ympan := ymchannels + YMChannel::pan
 midibend := midichannels + MIDIChannel::pitchbend
 
 .segment "CODE"
@@ -315,6 +319,12 @@ highloop:
     dec
     bra highloop
 done:
+    rts
+.endproc
+
+
+.proc midi_is_playing: near
+    lda midistate + MIDIState::playing
     rts
 .endproc
 
@@ -625,7 +635,7 @@ save_deltas:
     bne :+
     jmp end
 :
-    
+    stz tracks_playing
     stz track_iter
     ldx #0
 trackloop:
@@ -634,6 +644,8 @@ trackloop:
     bne :+
     jmp nexttrack_nosave
 :
+
+    inc tracks_playing
 
     ; subtract a delta per call
     sec
@@ -792,9 +804,18 @@ tccloop:
 
     ; adjust tempo if it changed on this tick
     lda midistate + MIDIState::tempochange
-    beq end
+    beq check_if_any_playing
     jsr calc_deltas_per_call
     stz midistate + MIDIState::tempochange
+
+check_if_any_playing:
+    ; if no tracks are playing, end the song
+    lda tracks_playing
+    bne :+
+    stz midistate + MIDIState::playing
+:
+
+
 end:
     rts
 .endproc
@@ -805,9 +826,9 @@ end:
 ; 1) return channel with the current MIDI channel and note
 ; 2) oldest non-playing with current instrument (skipped if MIDI Ch 10)
 ; 3) oldest non-playing
-; 4) oldest playing in MIDI channel 10 if held at least $40 ticks
+; 4) oldest playing in MIDI channel 10 if held at least 4 ticks
 ; 5) oldest playing in the current MIDI channel
-; 6) oldest playing that has been held at least $40 ticks
+; 6) oldest playing that has been held at least 4 ticks
 ; 7) reject, no channel available
 ; input - note to play in note_iter
 ; returns channel to use in X
@@ -907,8 +928,8 @@ p10loop:
 
 
     lda ymchannels + YMChannel::callcnt,x
-    cmp #$40
-    bcc :+ ; callcnt is less than $40
+    cmp #4
+    bcc :+ ; callcnt is less than 4
 
     cmp tmp1
     bcc :+ ; callcnt is less than the saved one
@@ -959,8 +980,8 @@ playing:
     ldx #0
 ploop:
     lda ymchannels + YMChannel::callcnt,x
-    cmp #$40
-    bcc :+ ; callcnt is less than $40
+    cmp #4
+    bcc :+ ; callcnt is less than 4
 
     cmp tmp1
     bcc :+ ; callcnt is less than the current one
@@ -1389,9 +1410,9 @@ volume:
 pan:
     ldx midichannel_iter
     lda tmp1
-    cmp #$50
+    cmp #$60
     bcs @right
-    cmp #$30
+    cmp #$20
     bcc @left
 
     lda #3
@@ -1497,6 +1518,11 @@ bendloop:
     lda ymchannels + YMChannel::midichannel,x
     cmp midichannel_iter
     bne blpend
+
+    ; a pitch-bent note resets this, might help
+    ; channel-stealing strategy as bendy notes are likely
+    ; lead notes
+    stz ymchannels + YMChannel::callcnt,x
 
     lda ymchannels + YMChannel::note,x
     tax

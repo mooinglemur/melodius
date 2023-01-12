@@ -12,13 +12,16 @@ start:
 .segment "CODE"
 
 .include "x16.inc"
-.include "audio.inc"
+.scope AudioAPI
+    .include "audio.inc"
+.endscope
 
 .import register_handler
 .import deregister_handler
 .import midi_parse
 .import midi_play
 .import midi_restart
+.import midi_is_playing
 
 .import setup_sprites
 .import do_midi_sprites
@@ -64,7 +67,14 @@ endless:
     
     jsr do_midi_sprites
 
-    jmp endless
+    jsr X16::Kernal::STOP ; test stop key
+    beq exit
+
+    jsr midi_is_playing
+    bne endless
+
+exit:
+    JSRFAR AudioAPI::ym_init, $0A
 
     jsr deregister_handler
     rts
