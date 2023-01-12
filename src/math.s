@@ -1,5 +1,6 @@
 
 .export multiply16x16
+.export multiply8x8
 .export divide40_24
 
 .export numerator
@@ -30,6 +31,12 @@ tmp1:
     .res 1
 
 .segment "CODE"
+
+.proc multiply8x8: near
+    stz multiplicand+1
+    stz multiplier+1
+    jmp multiply16x16
+.endproc
 
 .proc multiply16x16: near
     lda #0       ; Initialize part of mult_result to 0

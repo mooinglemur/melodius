@@ -10,6 +10,7 @@
 
 .import divide40_24
 .import multiply16x16
+.import multiply8x8
 
 .import numerator
 .import denominator
@@ -70,7 +71,10 @@
     pan         .byte MIDI_CHANNELS
     expression  .byte MIDI_CHANNELS
     damper      .byte MIDI_CHANNELS ; 0 normally, 1 if pedal is pressed
-    pitchbend   .byte MIDI_CHANNELS ; signed 8 bit, +127 = +2 semitones
+    pitchbend   .byte MIDI_CHANNELS ; signed 8 bit, +127 = +2 semitones normally
+    pbdepth     .byte MIDI_CHANNELS ; depth, 0-12 of pitch bend
+    rpnlsb      .byte MIDI_CHANNELS ; currently understood only for pitch bend depth
+    rpnmsb      .byte MIDI_CHANNELS ; currently understood only for pitch bend depth
 .endstruct
 
 .struct YMChannel
@@ -476,6 +480,8 @@ mloop:
     stz midichannels + MIDIChannel::instrument,x
     lda #3
     sta midichannels + MIDIChannel::pan,x
+    lda #2 
+    sta midichannels + MIDIChannel::pbdepth,x
 
     inx
     cpx #MIDI_CHANNELS
@@ -1315,6 +1321,11 @@ end:
 
     sty midizp
 
+    ldx midichannel_iter ; X as midi channel is most useful so do it once
+
+    cmp #$06 ; Data entry MSB
+    beq dataentry
+
     cmp #$07 ; Volume
     beq volume
 
@@ -1326,6 +1337,12 @@ end:
     cmp #$40 ; Damper/sustain pedal
     beq damper
 
+    cmp #$64 ; rpn lsb
+    beq rpnlsb
+
+    cmp #$65 ; rpn msb
+    beq rpnmsb
+
     cmp #$7F ; All notes off
     bne :+
     jmp all_notes_off
@@ -1334,12 +1351,31 @@ end:
 end:
     ldy #0
     rts
+dataentry:
+    ; pitch bend depth
+    lda midichannels + MIDIChannel::rpnmsb,x
+    bne end 
+    lda midichannels + MIDIChannel::rpnlsb,x
+    bne end
+
+    lda tmp1
+    sta midichannels + MIDIChannel::pbdepth,x
+    bra end
+rpnlsb:
+    lda tmp1
+    sta midichannels + MIDIChannel::rpnlsb,x
+    bra end
+rpnmsb:
+    lda tmp1
+    sta midichannels + MIDIChannel::rpnmsb,x
+    bra end
+
+
 damper:
     lda tmp1
     rol
     rol
     and #1
-    ldx midichannel_iter
     sta midichannels + MIDIChannel::damper,x
     ora #0
     bne end
@@ -1462,6 +1498,20 @@ all_notes_off:
 ; X = midi note
 .proc get_pb_kc_kf: near
     ora #0
+    beq even
+
+    ; Test for PB depth of 12 instead of 2
+    sta tmp+0
+    stx tmp+1
+    ldx midichannel_iter
+    lda midichannels + MIDIChannel::pbdepth,x
+    cmp #12
+    beq twelve
+    ldx tmp+1
+    lda tmp+0
+
+    ; assume depth of 2
+    ora #0
     bmi neg
     cmp #$7F
     beq u2
@@ -1490,6 +1540,36 @@ end:
     jsr AudioAPI::notecon_midi2fm
     MIDI_BORDER
     rts
+tmp:
+    .byte $00,$00,$00,$00
+twelve:
+    ; PB depth of 12
+    lda tmp+0 ; load PB value
+    cmp #$7F
+    beq plustwelve
+    sta multiplicand
+    lda #$18 ; each tick is this many KF (when KF is an 8-bit value)
+    sta multiplier
+    jsr multiply8x8
+
+    ldy mult_result ; low byte is true KF (8-bit)
+
+    lda mult_result+1 ; overflow into note value
+    clc
+    adc tmp+1
+    ldx tmp+0 ; check PB value for negative
+    bpl :+
+    adc #$E8 ; wraparound negative offset
+:
+    tax
+    bra end
+plustwelve:
+    lda tmp+1
+    clc
+    adc #12
+    tax
+    ldy #0
+    bra end
 .endproc
 
 .proc do_event_pitchbend: near
@@ -1525,9 +1605,10 @@ bendloop:
     stz ymchannels + YMChannel::callcnt,x
 
     lda ymchannels + YMChannel::note,x
+
     tax
     lda tmp2
-    jsr get_pb_kc_kf
+    jsr get_pb_kc_kf ; does not disturb tmp1/tmp2
 
     API_BORDER
     lda tmp1
