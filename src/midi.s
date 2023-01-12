@@ -1500,76 +1500,52 @@ all_notes_off:
     ora #0
     beq even
 
-    ; Test for PB depth of 12 instead of 2
-    sta tmp+0
-    stx tmp+1
+    ; get PB depth
+    sta pitch_bend
+    stx midi_note
     ldx midichannel_iter
     lda midichannels + MIDIChannel::pbdepth,x
-    cmp #12
-    beq twelve
-    ldx tmp+1
-    lda tmp+0
-
-    ; assume depth of 2
-    ora #0
-    bmi neg
-    cmp #$7F
-    beq u2
-    cmp #$40
-    bcc even
-    inx
-    bra even
-u2:
-    inx
-    inx
-    ldy #0
-    bra end
-neg:
-    cmp #$C0
-    bcs d1
-d2:
-    dex
-d1:
-    dex
-even:
     asl
-    asl
-    tay
-end:
-    API_BORDER
-    jsr AudioAPI::notecon_midi2fm
-    MIDI_BORDER
-    rts
-tmp:
-    .byte $00,$00,$00,$00
-twelve:
-    ; PB depth of 12
-    lda tmp+0 ; load PB value
-    cmp #$7F
-    beq plustwelve
-    sta multiplicand
-    lda #$18 ; each tick is this many KF (when KF is an 8-bit value)
     sta multiplier
+
+    lda pitch_bend ; load PB value
+    cmp #$7F
+    beq fullbendup
+    sta multiplicand
+    
     jsr multiply8x8
 
     ldy mult_result ; low byte is true KF (8-bit)
 
     lda mult_result+1 ; overflow into note value
     clc
-    adc tmp+1
-    ldx tmp+0 ; check PB value for negative
+    adc midi_note
+    ldx pitch_bend ; check PB value for negative
     bpl :+
-    adc #$E8 ; wraparound negative offset
+    ldx midichannel_iter
+    sec
+    sbc midichannels + MIDIChannel::pbdepth,x
+    sbc midichannels + MIDIChannel::pbdepth,x
 :
     tax
     bra end
-plustwelve:
-    lda tmp+1
+fullbendup:
+    lda midi_note
     clc
-    adc #12
+    adc midichannels + MIDIChannel::pbdepth,x
     tax
-    ldy #0
-    bra end
+    lda #0
+even:
+    tay
+end:
+    API_BORDER
+    jsr AudioAPI::notecon_midi2fm
+    MIDI_BORDER
+    rts
+midi_note:
+    .byte $00
+pitch_bend:
+    .byte $00
 .endproc
 
 .proc do_event_pitchbend: near
