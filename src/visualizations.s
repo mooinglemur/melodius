@@ -3,6 +3,7 @@
 .import ymnote, yminst, ymmidi, midibend, ympan
 .export do_midi_sprites
 .export setup_sprites
+.export setup_tiles
 
 .segment "BSS"
 
@@ -123,9 +124,9 @@ endbend:
     
     ; add #320 and drop the X coord
     clc
-    adc #<(320)
+    adc #<(336)
     sta Vera::Reg::Data0
-    lda #>(320)
+    lda #>(336)
     adc #0
     sta Vera::Reg::Data0
 
@@ -135,23 +136,23 @@ endbend:
     sbc ymnote,x
     sbc ymnote,x
 
-    ; bring it downward on the screen by 128
+    ; bring it downward on the screen by 194
     clc
-    adc #128
+    adc #194
     sta Vera::Reg::Data0
 
     lda #0
     adc #0
     sta Vera::Reg::Data0
 
-    ; set the Z depth
+    ; set the Z depth / flip
     lda #$0C
     ora pitchdown
     ora panright
     sta Vera::Reg::Data0
 
     ; set 16x16
-    lda #$50
+    lda #$51 ; and pal offset 1
     sta Vera::Reg::Data0
     bra splend
     
@@ -372,7 +373,6 @@ bendloop2arrow:
 
     rts
 
-
 bend_1:
     .byte $00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00
@@ -501,5 +501,96 @@ note_blocked:
     .byte $00,$01,$11,$00,$00,$01,$11,$00
     .byte $00,$00,$11,$11,$11,$11,$10,$00
     .byte $00,$00,$01,$11,$11,$11,$00,$00
+
+.endproc
+
+
+.proc setup_tiles: near
+    ; load TILES.BIN to VRAM $4000
+    lda #9
+    ldx #<tiles
+    ldy #>tiles
+    jsr X16::Kernal::SETNAM
+
+    lda #1
+    ldx #8
+    ldy #2
+    jsr X16::Kernal::SETLFS
+
+    ldx #<($4000) ; VRAM address
+    ldy #>($4000)
+    lda #2 ; VRAM LOAD, bank 0
+    jsr X16::Kernal::LOAD
+
+    ; load TILEMAP.BIN to VRAM $8000
+    lda #11
+    ldx #<tilemap
+    ldy #>tilemap
+    jsr X16::Kernal::SETNAM
+
+    lda #1
+    ldx #8
+    ldy #2
+    jsr X16::Kernal::SETLFS
+
+    ldx #<($8000) ; VRAM address
+    ldy #>($8000)
+    lda #2 ; VRAM LOAD, bank 0
+    jsr X16::Kernal::LOAD
+
+
+    ; Set up Layer 0 to point to it
+    lda #%00010010 ; 64x32 4bpp
+    sta Vera::Reg::L0Config
+
+    lda #($8000 >> 9)
+    sta Vera::Reg::L0MapBase
+
+    lda #(($4000 >> 11) << 2) | %00000011 ; 16x16
+    sta Vera::Reg::L0TileBase
+
+    stz Vera::Reg::Ctrl
+    ; enable layer 0
+    lda Vera::Reg::DCVideo
+    ora #%00010000
+    sta Vera::Reg::DCVideo
+
+    ; clear the text screen with a black bg
+    ldx #0
+:
+    lda color_seq,x
+    jsr X16::Kernal::CHROUT
+    inx
+    cpx #4
+    bcc :-
+
+    ; set palette offset 1 up
+    VERA_SET_ADDR (Vera::VRAM_palette + 32), 1
+    ldx #0
+:
+    lda pal,x
+    sta Vera::Reg::Data0
+    inx
+    cpx #64
+    bcc :-
+
+    rts
+tiles:
+    .byte "TILES.BIN"
+tilemap:
+    .byte "TILEMAP.BIN"
+color_seq:
+    .byte $90,$01,$05,$93
+pal:
+    ; Sprites
+    ;      bg    pno   chpr  orgn  guit  bass  str   ens
+    .word $0000,$0FFF,$08A3,$0DDF,$0F8A,$000F,$00F0,$00FF
+    ;      bras  reed  pipe  lead  pad   fx    eth   perc
+    .word $0FF0,$0DFD,$0FDD,$0ABC,$06AF,$0FA6,$0AF6,$0A6F
+    ; Tileset
+    ;      bg    none  pno1  pno2  pnoC  none  none  skin
+    .word $0000,$0FF0,$0222,$0333,$0554,$0555,$0555,$0334
+    ;      none  text
+    .word $0555,$0FFF,$0AAA,$0BBB,$0CCC,$0DDD,$0EEE,$0FFF
 
 .endproc

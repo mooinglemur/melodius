@@ -17,3 +17,8 @@
     lda #1
     sta Vera::Reg::DCBorder
 .endmacro
+
+.macro VIZ_BORDER
+    lda #12
+    sta Vera::Reg::DCBorder
+.endmacro

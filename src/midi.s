@@ -833,7 +833,7 @@ end:
 ; 2) oldest non-playing with current instrument (skipped if MIDI Ch 10)
 ; 3) oldest non-playing
 ; 4) oldest playing in MIDI channel 10 if held at least 4 ticks
-; 5) oldest playing in the current MIDI channel
+; 5) oldest playing with the same instrument number
 ; 6) oldest playing that has been held at least 4 ticks
 ; 7) reject, no channel available
 ; input - note to play in note_iter
@@ -918,7 +918,8 @@ nploop:
     bcc nploop
 
     ldx tmp2
-    bpl end
+    bmi playing10
+    jmp end
 
 
 playing10:
@@ -952,21 +953,22 @@ p10loop:
 
 
 
-
 playingch:
-    ; oldest in same MIDI channel
+    ; oldest with same instrument (formerly same midi channel) playing for at least one tick
     stz tmp1 ; callcnt
     lda #$ff
     sta tmp2 ; ym channel
     ldx #0
 pchloop:
-    lda ymchannels + YMChannel::midichannel,x
-    cmp midichannel_iter
-    bne :+
+    lda ymchannels + YMChannel::instrument,x
+    ldy midichannel_iter
+    cmp midichannels + MIDIChannel::instrument,y
+    bne :+ ; channel is using a different instrument
 
     lda ymchannels + YMChannel::callcnt,x
     cmp tmp1
     bcc :+ ; callcnt is less than the saved one
+    beq :+ ; callcnt is 0 (can't replace on same tick)
 
     stx tmp2
     sta tmp1
@@ -1323,11 +1325,16 @@ end:
 
     ldx midichannel_iter ; X as midi channel is most useful so do it once
 
+    cmp #$01 ; Modulation wheel
+    beq modwheel
+
     cmp #$06 ; Data entry MSB
     beq dataentry
 
     cmp #$07 ; Volume
-    beq volume
+    bne :+
+    jmp volume
+:
 
     cmp #$0A ; Pan MSB
     bne :+
@@ -1351,6 +1358,12 @@ end:
 end:
     ldy #0
     rts
+modwheel:
+    lda tmp1
+    sta midichannels + MIDIChannel::modwheel,x
+    jsr apply_modwheel
+    bra end
+
 dataentry:
     ; pitch bend depth
     lda midichannels + MIDIChannel::rpnmsb,x
@@ -1359,6 +1372,8 @@ dataentry:
     bne end
 
     lda tmp1
+    cmp #25 ; capped at 24, found some midi file requesting something much higher and it was obviously wrong, should have been 2 in that midi file.
+    bcs end
     sta midichannels + MIDIChannel::pbdepth,x
     bra end
 rpnlsb:
@@ -1620,5 +1635,38 @@ blpend:
 decit:
     dec midizp+1
 end:
+    rts
+.endproc
+
+.proc apply_modwheel: near
+    ; let's just set the bas_fmvib style here
+    stz tmp1
+    ldx #0
+modloop:
+    cpx #9 ; MIDI channel 10 mod doesn't matter
+    beq :+
+    lda midichannels + MIDIChannel::modwheel,x
+    cmp tmp1
+    bcc :+
+    sta tmp1
+:
+    inx
+    cpx #MIDI_CHANNELS
+    bcc modloop
+    
+    lda tmp1
+    lsr
+    lsr
+    lsr
+    tax
+    beq write_mod
+    clc
+    adc #200
+write_mod:
+    tay
+    API_BORDER
+    tya
+    jsr AudioAPI::bas_fmvib
+    MIDI_BORDER
     rts
 .endproc

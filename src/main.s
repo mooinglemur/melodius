@@ -23,6 +23,7 @@ start:
 .import midi_restart
 .import midi_is_playing
 
+.import setup_tiles
 .import setup_sprites
 .import do_midi_sprites
 
@@ -52,6 +53,7 @@ main:
     sta Vera::Reg::Ctrl
 
     jsr setup_sprites
+    jsr setup_tiles
 
     jsr midi_restart
 
@@ -63,9 +65,10 @@ main:
 endless:
     DONE_BORDER
     wai
-    DONE_BORDER
-    
+
+    VIZ_BORDER
     jsr do_midi_sprites
+    DONE_BORDER
 
     jsr X16::Kernal::STOP ; test stop key
     beq exit
