@@ -6,7 +6,7 @@
 .export midi_restart
 .export midi_is_playing
 
-.export ymnote, yminst, ymmidi, midibend, ympan
+.export ymnote, yminst, ymmidi, midibend, ympan, midiinst
 
 .import divide40_24
 .import multiply16x16
@@ -130,6 +130,7 @@ yminst := ymchannels + YMChannel::instrument
 ymmidi := ymchannels + YMChannel::midichannel
 ympan := ymchannels + YMChannel::pan
 midibend := midichannels + MIDIChannel::pitchbend
+midiinst := midichannels + MIDIChannel::instrument
 
 .segment "CODE"
 
@@ -833,9 +834,10 @@ end:
 ; 2) oldest non-playing with current instrument (skipped if MIDI Ch 10)
 ; 3) oldest non-playing
 ; 4) oldest playing in MIDI channel 10 if held at least 4 ticks
-; 5) oldest playing with the same instrument number
+; 5) oldest playing with the same instrument number (held at least one tick)
 ; 6) oldest playing that has been held at least 4 ticks
-; 7) reject, no channel available
+; 7) oldest playing where two channels are playing the same note (same-tick steals okay)
+; 8) reject, no channel available
 ; input - note to play in note_iter
 ; returns channel to use in X
 ; trashes Y, unfortunately
@@ -949,12 +951,14 @@ p10loop:
     bcc p10loop
 
     ldx tmp2
-    bpl end
+    bmi :+
+    jmp end
+:
 
 
 
 playingch:
-    ; oldest with same instrument (formerly same midi channel) playing for at least one tick
+    ; oldest with same instrument (on any midi channel) playing for at least one tick
     stz tmp1 ; callcnt
     lda #$ff
     sta tmp2 ; ym channel
@@ -980,8 +984,10 @@ pchloop:
     ldx tmp2
     bpl end
 
+
+
 playing:
-    ; oldest playing but only older than $40 calls
+    ; oldest playing but only older than 4 calls
     stz tmp1 ; callcnt
     lda #$ff
     sta tmp2 ; ym channel
@@ -1000,6 +1006,59 @@ ploop:
     inx
     cpx #YM2151_CHANNELS
     bcc ploop
+
+    ldx tmp2
+    bpl end
+
+samenote:
+    ; steal oldest playing where two channels are already playing the same note as each other (not necessarily that of the incoming note) MIDI channel 10 is not considered
+    ; steals within the same tick are okay here
+    stz tmp1
+    lda #$ff
+    sta tmp2
+
+    ldx #0
+snloop1:
+    txa
+    tay
+    iny
+
+    lda ymchannels + YMChannel::midichannel,x
+    cmp #9
+    beq sl1end
+snloop2:
+    lda ymchannels + YMChannel::midichannel,y
+    cmp #9
+    beq sl2end
+    lda ymchannels + YMChannel::note,x
+    cmp ymchannels + YMChannel::note,y
+    bne sl2end
+
+    ; which of these two are oldest
+    lda ymchannels + YMChannel::callcnt,x
+    cmp ymchannels + YMChannel::callcnt,y
+    bcs x_older
+y_older:
+    lda ymchannels + YMChannel::callcnt,y
+    cmp tmp1
+    bcc sl2end
+    sty tmp2
+    sta tmp1
+    bra sl2end
+x_older: ; or same
+    cmp tmp1
+    bcc sl2end
+    stx tmp2
+    sta tmp1
+sl2end:
+    iny
+    cpy #YM2151_CHANNELS
+    bcc snloop2
+
+sl1end:
+    inx
+    cpx #(YM2151_CHANNELS-1)
+    bcc snloop1
 
     ldx tmp2
 end:
@@ -1273,15 +1332,30 @@ ymloop:
     sta ymchannels + YMChannel::undamped,x
     bra end
 nopedal:
-    ; mark the note as released
-    stz ymchannels + YMChannel::note,x
-    stz ymchannels + YMChannel::callcnt,x
-
+    ; if it's a drum, don't actually release, except for certain notes
+    ; because many midi files have really short note times that make the
+    ; drums sound awful
+;    cpy #9
+;    bne release
+;    lda ymchannels + YMChannel::note,x
+;    cmp #25 ; drum roll
+;    beq release
+;    cmp #46 ; open hat
+;    beq release
+;    bra after_release
+release:
+    phx
     ; release note
     API_BORDER
     txa
     jsr AudioAPI::ym_release
     MIDI_BORDER
+    plx
+after_release:
+    ; mark the note as released
+    stz ymchannels + YMChannel::note,x
+    stz ymchannels + YMChannel::callcnt,x
+
 
     bra end
 

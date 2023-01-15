@@ -25,7 +25,9 @@ start:
 
 .import setup_tiles
 .import setup_sprites
+.import setup_instruments
 .import do_midi_sprites
+.import update_instruments
 
 .include "macros.inc"
 
@@ -54,6 +56,7 @@ main:
 
     jsr setup_sprites
     jsr setup_tiles
+    jsr setup_instruments
 
     jsr midi_restart
 
@@ -68,6 +71,8 @@ endless:
 
     VIZ_BORDER
     jsr do_midi_sprites
+
+    jsr update_instruments
     DONE_BORDER
 
     jsr X16::Kernal::STOP ; test stop key
