@@ -1464,6 +1464,7 @@ damper:
     lda tmp1
     rol
     rol
+    rol
     and #1
     sta midichannels + MIDIChannel::damper,x
     ora #0
