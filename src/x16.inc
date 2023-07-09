@@ -282,6 +282,7 @@ x16_inc = 1
         KBD_SCAN                      := $FF9F
         SETTMO                        := $FFA2
         IECIN                         := $FFA5
+        ACPTR                         := IECIN
         IECOUT                        := $FFA8
         UNTALK                        := $FFAB
         UNLISTEN                      := $FFAE

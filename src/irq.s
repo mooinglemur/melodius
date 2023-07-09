@@ -5,11 +5,16 @@
 .export deregister_handler
 
 .import midi_playtick
+.import playback_mode
 
 .segment "BSS"
 old_irq_handler:
     .res 2
 .segment "CODE"
+
+.scope zsmkit
+.include "zsmkit.inc"
+.endscope
 
 .include "macros.inc"
 
@@ -63,16 +68,31 @@ handler:
 
     lda X16::Reg::RAMBank
     pha
-    
+
     MIDI_BORDER
 
-    jsr midi_playtick
+    lda playback_mode
+    beq @end
 
+    cmp #1
+    beq @midi
+    cmp #2
+    beq @zsm
+    bra @end
+
+@midi:
+    jsr midi_playtick
+    bra @end
+@zsm:
+    jsr zsmkit::zsm_tick
+
+@end:
     pla
     sta X16::Reg::RAMBank
 
     pla
     sta X16::Reg::ROMBank
+
 
     KERNAL_BORDER
 

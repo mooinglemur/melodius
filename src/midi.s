@@ -5,6 +5,7 @@
 .export midi_playtick
 .export midi_restart
 .export midi_is_playing
+.export midi_stop
 
 .export ymnote, yminst, ymmidi, midibend, ympan, midiinst
 
@@ -635,6 +636,31 @@ save_deltas:
     rts
 .endproc
 
+.proc midi_stop: near
+    stz midistate + MIDIState::playing
+
+    php
+    sei
+
+    lda X16::Reg::ROMBank
+    pha
+    lda #$0a
+    sta X16::Reg::ROMBank
+
+
+    lda #YM2151_CHANNELS
+:   jsr AudioAPI::ym_release
+    dec
+    bne :-
+
+    pla
+    sta X16::Reg::ROMBank
+
+    plp
+
+    rts
+.endproc
+
 .proc midi_playtick: near
     ; are we in playback mode?
     ; bail out immediately if not
@@ -740,7 +766,6 @@ normal_status:
     beq event_meta        ; $FF 
     
 event_error:
-    stp
     stz miditracks + MIDITrack::playable,x
     bra nexttrack
 event_note_off:

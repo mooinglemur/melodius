@@ -1,11 +1,24 @@
+.macpack longbranch
+
 .include "x16.inc"
+
+.scope zsmkit
+.include "zsmkit.inc"
+.endscope
+
+.scope AudioAPI
+    .include "audio.inc"
+.endscope
+
 
 .import ymnote, yminst, ymmidi, midibend, ympan, midiinst
 .export update_instruments
 .export do_midi_sprites
+.export do_zsm_sprites
 .export setup_sprites
 .export setup_tiles
 .export setup_instruments
+.export hide_sprites
 
 .segment "BSS"
 
@@ -24,6 +37,10 @@ instrument_cursor:
 instrument:
     .res 16
 callcnt:
+    .res 1
+midinote:
+    .res 1
+midifrac:
     .res 1
 
 .segment "ZEROPAGE"
@@ -202,7 +219,9 @@ p128: .byte "            "
 p129: .byte "PERCUSSION  "
 
 CURSOR_LINGER = $68
-CURSOR_PETSCII = $A1
+CURSOR_PETSCII = $AD
+
+
 
 .proc setup_instruments: near
     ldx #0
@@ -233,7 +252,7 @@ midiloop:
     bne midiloop
 
     ; redefine cursor
-    VERA_SET_ADDR (Vera::VRAM_charset+((CURSOR_PETSCII-$40)*8)), 1
+    VERA_SET_ADDR (Vera::VRAM_charset+((CURSOR_PETSCII)*8)), 1
     lda #$7E
     sta Vera::Reg::Data0
     sta Vera::Reg::Data0
@@ -277,6 +296,16 @@ point_cursor:
 .endproc
 
 .proc update_instruments: near
+    ; make white on black
+    lda #$05
+    jsr X16::Kernal::CHROUT
+    lda #1
+    jsr X16::Kernal::CHROUT
+    lda #$90
+    jsr X16::Kernal::CHROUT
+    lda #1
+    jsr X16::Kernal::CHROUT
+
     inc callcnt
     ldx #0
 instloop:
@@ -377,6 +406,27 @@ point_cursor:
     plx ; Y coordinate goes in X register :(
     jsr X16::Kernal::PLOT ; carry is clear, set position
     plx ; restore midi channel iterator
+    rts
+.endproc
+
+.proc hide_sprites: near
+    stz Vera::Reg::Ctrl
+    lda #<Vera::VRAM_sprattr
+    sta Vera::Reg::AddrL
+    lda #>Vera::VRAM_sprattr
+    sta Vera::Reg::AddrM
+    lda #^Vera::VRAM_sprattr
+    ora #$10 ; auto increment = 1
+    sta Vera::Reg::AddrH
+    ldy #0
+loop:
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    dey
+    bne loop
+
     rts
 .endproc
 
@@ -535,6 +585,202 @@ splend:
 end:
     rts
 .endproc
+
+.proc do_zsm_sprites: near
+    stz iterator
+
+    lda #1
+    sta X16::Reg::RAMBank
+
+    stz Vera::Reg::Ctrl
+    lda #<Vera::VRAM_sprattr
+    sta Vera::Reg::AddrL
+    lda #>Vera::VRAM_sprattr
+    sta Vera::Reg::AddrM
+    lda #^Vera::VRAM_sprattr
+    ora #$10 ; auto increment = 1
+    sta Vera::Reg::AddrH
+
+    ldx iterator
+sploop:
+    txa
+    asl
+    asl
+    tax
+    lda zsmkit::vera_psg_shadow+2,x
+    and #$3f
+    jeq hideit
+
+    lda zsmkit::vera_psg_shadow+1,x
+    tay
+    lda zsmkit::vera_psg_shadow+0,x
+    tax
+
+    stz midifrac
+    JSRFAR AudioAPI::notecon_psg2midi, $0a
+    bcs high
+    stx midinote
+    tya
+    bpl :+
+    inc midinote
+:   sta midifrac ; signed
+
+    lda midinote
+    cmp #108
+high:
+    bcc :+
+    lda #108
+    sta midinote
+:   cmp #12
+    bcs :+
+    lda #12
+    sta midinote
+:
+
+    stz pitchdown
+    stz panright
+
+    lda iterator
+    asl
+    asl
+    tax
+    lda zsmkit::vera_psg_shadow+3,x
+    rol
+    rol
+    rol
+    and #$03
+    tay
+    lda wav2color,y
+    asl
+    asl
+
+    sta tmp1
+    stz tmp2
+
+chkpan:
+    lda zsmkit::vera_psg_shadow+2,x
+    rol
+    rol
+    rol
+    and #3
+    cmp #3
+    beq chkpitch
+
+    cmp #1
+    beq :+
+    inc panright
+:
+    lda tmp1
+    clc
+    adc #64
+    sta tmp1
+    lda #0
+    adc #0
+    sta tmp2
+chkpitch:
+    lda midifrac
+    beq endbend
+    bpl contbend
+
+    cmp #$F0
+    bcs endbend
+
+    ldy #2
+    sty pitchdown
+
+    cmp #$C0
+    bcs endbend
+    bra softbend
+
+contbend:
+    cmp #$40
+    bcc endbend
+;    cmp #$40
+;    bcs hardbend
+softbend:
+    lda tmp1
+    clc
+    adc #128
+    sta tmp1
+    lda #0
+    adc #0
+    sta tmp2
+    bra endbend
+hardbend:
+    inc tmp2
+endbend:
+    lda tmp1
+    sta Vera::Reg::Data0
+
+    ; no high bits, mode 0
+    lda tmp2
+    sta Vera::Reg::Data0
+
+    ; multiply PSG channel by 16
+    lda iterator
+    asl
+    asl
+    asl
+    asl
+    
+    ; add #320 and drop the X coord
+    clc
+    adc #<(336)
+    sta Vera::Reg::Data0
+    lda #>(336)
+    adc #0
+    sta Vera::Reg::Data0
+
+    ; note is Y coord
+    lda #255
+    sec
+    sbc midinote
+    sbc midinote
+
+    ; bring it downward on the screen by 194
+    clc
+    adc #194
+    sta Vera::Reg::Data0
+
+    lda #0
+    adc #0
+    sta Vera::Reg::Data0
+
+    ; set the Z depth / flip
+    lda #$0C
+    ora pitchdown
+    ora panright
+    sta Vera::Reg::Data0
+
+    ; set 16x16
+    lda #$51 ; and pal offset 1
+    sta Vera::Reg::Data0
+    bra splend
+    
+
+hideit:
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+splend:
+    inc iterator
+    ldx iterator
+    cpx #16
+    bcs end
+    jmp sploop
+
+end:
+    rts
+
+wav2color:
+    .byte 1,4,12,8
+.endproc
+
 
 
 .proc setup_sprites: near

@@ -1,10 +1,10 @@
 .macro MIDI_BORDER
-    lda #4
+    lda #15
     sta Vera::Reg::DCBorder
 .endmacro
 
 .macro KERNAL_BORDER
-    lda #13
+    lda #0
     sta Vera::Reg::DCBorder
 .endmacro
 
@@ -19,6 +19,6 @@
 .endmacro
 
 .macro VIZ_BORDER
-    lda #12
+    lda #0
     sta Vera::Reg::DCBorder
 .endmacro

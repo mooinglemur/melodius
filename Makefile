@@ -22,7 +22,7 @@ default: all
 all: $(EXE)
 
 $(EXE): $(OBJS) $(CONFIG)
-	$(LD) $(LDFLAGS) $(OBJS) -m $(MAPFILE) -Ln $(SYMFILE) -o $@ 
+	$(LD) $(LDFLAGS) $(OBJS) -m $(MAPFILE) -Ln $(SYMFILE) ../zsmkit/lib/zsmkit.lib -o $@ 
 
 $(OBJ)/%.o: $(SRC)/%.s | $(OBJ)
 	$(AS) $(ASFLAGS) $< -o $@
@@ -37,15 +37,15 @@ $(SDCARD): $(EXE)
 	mformat -i $(SDCARD)@@1M -v $(call UC,$(PROJECT)) -F
 	mcopy -i $(SDCARD)@@1M -o -m $(EXE) ::
 	mcopy -i $(SDCARD)@@1M -o -m TILES.BIN TILEMAP.BIN ::
-	mcopy -i $(SDCARD)@@1M -o -m *.MID ::
+	mcopy -i $(SDCARD)@@1M -o -s -v -m ROOT/* ::
 
 .PHONY: clean run
 clean:
 	$(RM) $(EXE) $(OBJS) $(SDCARD) $(MAPFILE) $(SYMFILE)
 
 box: $(EXE) $(SDCARD)
-	SDL_AUDIODRIVER=alsa box16 -sdcard $(SDCARD) -prg $(EXE) -run
+	box16 -sdcard $(SDCARD) -prg $(EXE) -run
 
 run: $(EXE) $(SDCARD)
-	x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -scale 2 -run
+	x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -scale 2 -run -ram 1024
 	
