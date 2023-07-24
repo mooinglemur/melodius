@@ -10,6 +10,8 @@
     .include "audio.inc"
 .endscope
 
+.import tileset
+.import set_dir_box_size
 
 .import ymnote, yminst, ymmidi, midibend, ympan, midiinst
 .export update_instruments
@@ -19,6 +21,8 @@
 .export setup_tiles
 .export setup_instruments
 .export hide_sprites
+.export draw_file_box
+.export draw_pianos
 
 .segment "BSS"
 
@@ -222,9 +226,159 @@ CURSOR_LINGER = $68
 CURSOR_PETSCII = $AD
 
 
+; x/y dimensions of box (16 pixel tiles)
+.proc draw_file_box
+    ; don't do it if it wouldn't change things
+    cpy oldrows
+    bne :+
+    cpx oldcols
+    bne :+
+
+    rts
+
+:   sty rows
+    sty oldrows
+    tya
+    asl
+    tay
+    stx cols
+    stx oldcols
+    txa
+    asl
+    tax
+    jsr set_dir_box_size
+
+    ; implies a clear screen (text)
+    jsr clear_screen
+
+    ; clear most of screen
+    VERA_SET_ADDR $8300, 1
+
+    ldx #6
+    ldy #0
+
+cloop:
+    lda #$12
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+    dey
+    bne cloop
+    dex
+    bne cloop
+
+    ; now start drawing the box
+    VERA_SET_ADDR $8304, 1
+
+    ; legend and top
+    ldx #0
+tploop:
+    lda top_preamble,x
+    sta Vera::Reg::Data0
+    inx
+    cpx #6
+    bne tploop
+
+    ; rest of top (border)
+    ldy cols
+    dey
+    dey
+tploop2:
+    lda #$21
+    sta Vera::Reg::Data0
+    lda #$28
+    sta Vera::Reg::Data0
+    dey
+    bne tploop2
+
+    ; upper right corner
+    lda #$23
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+
+mainloop:
+    jsr eat_it
+
+    ; left side
+    lda #$18
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+
+    ldy cols
+midloop:
+    lda #$2f
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+    dey
+    bne midloop
+
+    ; right side
+    lda #$24
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+
+    dec rows
+    bne mainloop
+
+
+    jsr eat_it
+
+    ; bottom edge
+    lda #$25
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+
+    ldy cols
+botloop:
+    lda #$21
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+    dey
+    bne botloop
+
+    lda #$22
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+
+    rts
+
+eat_it:
+    lda #62
+    sec
+    sbc cols
+    tay
+@eatloop:
+    lda Vera::Reg::Data0
+    lda Vera::Reg::Data0
+    dey
+    bne @eatloop
+    rts
+
+top_preamble:
+    .byte $23,$24,$1c,$20,$1d,$20
+rows:
+    .byte 0
+cols:
+    .byte 0
+oldrows:
+    .byte 0
+oldcols:
+    .byte 0
+.endproc
 
 .proc setup_instruments: near
     ldx #0
+    lda #$90 ; black
+    jsr X16::Kernal::CHROUT
+    lda #$01 ; background
+    jsr X16::Kernal::CHROUT
 midiloop:
     lda #$FF
     sta instrument,x
@@ -297,13 +451,11 @@ point_cursor:
 
 .proc update_instruments: near
     ; make white on black
-    lda #$05
-    jsr X16::Kernal::CHROUT
-    lda #1
-    jsr X16::Kernal::CHROUT
     lda #$90
     jsr X16::Kernal::CHROUT
     lda #1
+    jsr X16::Kernal::CHROUT
+    lda #$05
     jsr X16::Kernal::CHROUT
 
     inc callcnt
@@ -586,12 +738,7 @@ end:
     rts
 .endproc
 
-.proc do_zsm_sprites: near
-    stz iterator
-
-    lda #1
-    sta X16::Reg::RAMBank
-
+.proc do_zsm_sprites
     stz Vera::Reg::Ctrl
     lda #<Vera::VRAM_sprattr
     sta Vera::Reg::AddrL
@@ -600,6 +747,250 @@ end:
     lda #^Vera::VRAM_sprattr
     ora #$10 ; auto increment = 1
     sta Vera::Reg::AddrH
+
+    lda #1
+    sta X16::Reg::RAMBank
+
+    jsr do_zsm_pcm_sprite
+    jsr do_zsm_psg_sprites
+    ; fall through to do_zsm_ym_sprites
+.endproc
+
+
+.proc do_zsm_ym_sprites: near
+    stz iterator
+
+    lda #1
+    sta X16::Reg::RAMBank
+
+    ldx iterator
+sploop:
+    lda zsmkit::opm_key_shadow,x
+    and #$38
+    jeq hideit
+
+    lda zsmkit::opm_shadow+$28,x
+    tax
+
+    JSRFAR AudioAPI::notecon_fm2midi, $0a
+    bcs high
+    stx midinote
+    
+    ldx iterator
+    lda zsmkit::opm_shadow+$30,x
+
+    bpl :+
+    inc midinote
+:   sta midifrac ; signed
+
+    lda midinote
+    cmp #108
+high:
+    bcc :+
+    lda #108
+    sta midinote
+:   cmp #12
+    bcs :+
+    lda #12
+    sta midinote
+:
+
+    stz pitchdown
+    stz panright
+
+    ldx iterator
+    lda zsmkit::opm_shadow+$20,x
+    and #$07
+    tay
+    lda wav2color,y
+    asl
+    asl
+
+    sta tmp1
+    stz tmp2
+
+chkpan:
+    lda zsmkit::opm_shadow+$20,x
+    rol
+    rol
+    rol
+    and #3
+    cmp #3
+    beq chkpitch
+
+    cmp #1
+    beq :+
+    inc panright
+:
+    lda tmp1
+    clc
+    adc #64
+    sta tmp1
+    lda #0
+    adc #0
+    sta tmp2
+chkpitch:
+    lda midifrac
+    beq endbend
+    bpl contbend
+
+    cmp #$C0
+    bcs endbend
+
+    ldy #2
+    sty pitchdown
+    bra softbend
+contbend:
+    cmp #$40
+    bcc endbend
+softbend:
+    lda tmp1
+    clc
+    adc #128
+    sta tmp1
+    lda #0
+    adc #0
+    sta tmp2
+    bra endbend
+hardbend:
+    inc tmp2
+endbend:
+    lda tmp1
+    sta Vera::Reg::Data0
+
+    ; no high bits, mode 0
+    lda tmp2
+    sta Vera::Reg::Data0
+
+    ; multiply PSG channel by 16
+    lda iterator
+    asl
+    asl
+    asl
+    asl
+    
+    ; add #320 and drop the X coord
+    clc
+    adc #<(48)
+    sta Vera::Reg::Data0
+    lda #>(48)
+    adc #0
+    sta Vera::Reg::Data0
+
+    ; note is Y coord
+    lda #255
+    sec
+    sbc midinote
+    sbc midinote
+
+    ; bring it downward on the screen by 194
+    clc
+    adc #194
+    sta Vera::Reg::Data0
+
+    lda #0
+    adc #0
+    sta Vera::Reg::Data0
+
+    ; set the Z depth / flip
+    lda #$0C
+    ora pitchdown
+    ora panright
+    sta Vera::Reg::Data0
+
+    ; set 16x16
+    lda #$51 ; and pal offset 1
+    sta Vera::Reg::Data0
+    bra splend
+    
+
+hideit:
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+splend:
+    inc iterator
+    ldx iterator
+    cpx #8
+    bcs end
+    jmp sploop
+
+end:
+    rts
+
+wav2color:
+    .byte 12,2,15,4,6,1,8,7
+.endproc
+
+.proc do_zsm_pcm_sprite: near
+    lda zsmkit::pcm_busy
+    beq hideit
+
+    lda Vera::Reg::AudioCtrl
+    lsr
+    lsr
+    lsr
+    lsr
+    and #$03
+    tay
+    lda wav2color,y
+    asl
+    asl
+
+    sta Vera::Reg::Data0
+    stz Vera::Reg::Data0
+
+    ; add offset and drop the X coord
+    lda #<(464)
+    sta Vera::Reg::Data0
+    lda #>(464)
+    sta Vera::Reg::Data0
+
+    ; note is Y coord
+    lda #128
+    sec
+    sbc Vera::Reg::AudioRate
+
+    ; bring it downward on the screen
+    clc
+    adc #240
+    sta Vera::Reg::Data0
+
+    lda #0
+    adc #0
+    sta Vera::Reg::Data0
+
+    ; set the Z depth / flip
+    lda #$0C
+    sta Vera::Reg::Data0
+
+    ; set 16x16
+    lda #$51 ; and pal offset 1
+    sta Vera::Reg::Data0
+
+    rts
+hideit:
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+    stz Vera::Reg::Data0
+
+    rts
+wav2color:
+    .byte 1,8,15,14
+.endproc
+
+.proc do_zsm_psg_sprites: near
+    stz iterator
 
     ldx iterator
 sploop:
@@ -682,21 +1073,17 @@ chkpitch:
     beq endbend
     bpl contbend
 
-    cmp #$F0
+    cmp #$C0
     bcs endbend
 
     ldy #2
     sty pitchdown
 
-    cmp #$C0
-    bcs endbend
     bra softbend
 
 contbend:
     cmp #$40
     bcc endbend
-;    cmp #$40
-;    bcs hardbend
 softbend:
     lda tmp1
     clc
@@ -723,11 +1110,11 @@ endbend:
     asl
     asl
     
-    ; add #320 and drop the X coord
+    ; add offset and drop the X coord
     clc
-    adc #<(336)
+    adc #<(192)
     sta Vera::Reg::Data0
-    lda #>(336)
+    lda #>(192)
     adc #0
     sta Vera::Reg::Data0
 
@@ -1111,37 +1498,74 @@ note_blocked:
 
 
 .proc setup_tiles: near
-    ; load TILES.BIN to VRAM $4000
-    lda #9
-    ldx #<tiles
-    ldy #>tiles
-    jsr X16::Kernal::SETNAM
+    ; load tiles to VRAM $4000
+    ldx #<tileset
+    ldy #>tileset
 
-    lda #1
-    ldx #8
-    ldy #2
-    jsr X16::Kernal::SETLFS
+    stx TS
+    sty TS+1
 
-    ldx #<($4000) ; VRAM address
-    ldy #>($4000)
-    lda #2 ; VRAM LOAD, bank 0
-    jsr X16::Kernal::LOAD
+    VERA_SET_ADDR $4000, 1
 
-    ; load TILEMAP.BIN to VRAM $8000
-    lda #11
-    ldx #<tilemap
-    ldy #>tilemap
-    jsr X16::Kernal::SETNAM
+    ldx #$30
+    ldy #0
+tsloop:
+    lda $ffff,y
+TS = * - 2
+    sta Vera::Reg::Data0
+    iny
+    bne tsloop
+    inc TS+1
+    dex
+    bne tsloop
 
-    lda #1
-    ldx #8
-    ldy #2
-    jsr X16::Kernal::SETLFS
+    ; clear $8000 of 64x32 tiles
+    ; blank tile is $12 with attribute byte $20
 
-    ldx #<($8000) ; VRAM address
-    ldy #>($8000)
-    lda #2 ; VRAM LOAD, bank 0
-    jsr X16::Kernal::LOAD
+    VERA_SET_ADDR $8000, 1
+
+    ldx #$08
+    ldy #0
+tbloop:
+    lda #$12
+    sta Vera::Reg::Data0
+    lda #$20
+    sta Vera::Reg::Data0
+    iny
+    bne tbloop
+    dex
+    bne tbloop
+
+    ; fill in Melodius logo
+    ; top row
+    VERA_SET_ADDR $8106, 2
+
+    ldy #$30
+m1loop:
+    sty Vera::Reg::Data0
+    iny
+    cpy #$3f
+    bcc m1loop
+
+    ; middle row
+    VERA_SET_ADDR $8186, 2
+
+    ldy #$40
+m2loop:
+    sty Vera::Reg::Data0
+    iny
+    cpy #$4f
+    bcc m2loop
+
+    ; bottom row
+    VERA_SET_ADDR $8206, 2
+
+    ldy #$50
+m3loop:
+    sty Vera::Reg::Data0
+    iny
+    cpy #$5f
+    bcc m3loop
 
 
     ; Set up Layer 0 to point to it
@@ -1160,14 +1584,7 @@ note_blocked:
     ora #%00010000
     sta Vera::Reg::DCVideo
 
-    ; clear the text screen with a black bg
-    ldx #0
-:
-    lda color_seq,x
-    jsr X16::Kernal::CHROUT
-    inx
-    cpx #4
-    bcc :-
+    jsr clear_screen
 
     ; set palette offset 1 up
     VERA_SET_ADDR (Vera::VRAM_palette + 32), 1
@@ -1180,12 +1597,6 @@ note_blocked:
     bcc :-
 
     rts
-tiles:
-    .byte "TILES.BIN"
-tilemap:
-    .byte "TILEMAP.BIN"
-color_seq:
-    .byte $90,$01,$05,$93
 pal:
     ; Sprites
     ;      bg    pno   chpr  orgn  guit  bass  str   ens
@@ -1198,4 +1609,66 @@ pal:
     ;      none  text
     .word $0555,$0FFF,$0AAA,$0BBB,$0CCC,$0DDD,$0EEE,$0FFF
 
+.endproc
+
+.proc clear_screen
+    ; clear the text screen with a black bg
+    ldx #0
+:
+    lda color_seq,x
+    jsr X16::Kernal::CHROUT
+    inx
+    cpx #4
+    bcc :-
+
+    rts
+color_seq:
+    .byte $90,$01,$05,$93
+.endproc
+
+.proc draw_pianos
+    stx COL
+    asl COL
+    pha
+    phx
+    phy
+
+    ; $8000, half page per row
+    tya
+    lsr
+    php
+
+    adc #$80
+    sta Vera::Reg::AddrM
+
+    ; carry top half of page in
+    ; and add column * 2
+    plp
+    lda #0
+    ror
+    ora #$00
+COL = * - 1
+    sta Vera::Reg::AddrL
+
+    ; bank 0, increment 128 (one row)
+    lda #$80
+    sta Vera::Reg::AddrH
+
+    ldx #$04
+rptloop:
+    lda #$26
+    sta Vera::Reg::Data0
+    lda #$27
+    sta Vera::Reg::Data0
+    lda #$28
+    sta Vera::Reg::Data0
+    dex
+    bne rptloop
+
+    ply
+    plx
+    pla
+    rts
+rpt:
+    .byte 0
 .endproc

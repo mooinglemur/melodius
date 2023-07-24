@@ -25,3 +25,6 @@
 .import zcm_stop
 
 .import vera_psg_shadow
+.import opm_key_shadow
+.import opm_shadow
+.import pcm_busy

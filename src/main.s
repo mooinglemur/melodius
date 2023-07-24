@@ -41,10 +41,14 @@ playback_mode:
 .import show_directory
 .import dirlist_nav_down
 .import dirlist_nav_up
+.import dirlist_nav_home
+.import dirlist_nav_end
 .import dirlist_exec
 .import dir_needs_refresh
 .import dir_not_playing
 .import files_full_size
+.import draw_file_box
+.import check_lazy_load
 
 .include "macros.inc"
 
@@ -77,7 +81,7 @@ main:
 
     jsr setup_sprites
     jsr setup_tiles
-    jsr setup_instruments
+;    jsr setup_instruments
 
     stz playback_mode
 
@@ -87,6 +91,10 @@ main:
     jsr register_handler
 
     jsr init_directory
+
+    ldx #34
+    ldy #20
+    jsr draw_file_box
 
     jsr load_directory
     jsr show_directory
@@ -126,6 +134,18 @@ rekey:
     bra rekey
 :
 
+    cmp #$13 ; home
+    bne :+
+    jsr dirlist_nav_home
+    bra rekey
+:
+
+    cmp #$04 ; end
+    bne :+
+    jsr dirlist_nav_end
+    bra rekey
+:
+
     cmp #$20 ; space
     bne :+
     lda playback_mode
@@ -162,19 +182,30 @@ ismidi:
     jsr midi_is_playing
     bne continue
 stopmidi:
+    ldx #34
+    ldy #20
+    jsr draw_file_box
+    inc dir_needs_refresh
+
     jsr midi_stop
     jsr dir_not_playing
     stz playback_mode
     jsr hide_sprites
     bra continue
 iszsm:
+    jsr check_lazy_load
     jsr do_zsm_sprites
     ldx #0
     jsr zsmkit::zsm_getstate
     bcs continue
 stopzsm:
+    ldx #34
+    ldy #20
+    jsr draw_file_box
+    inc dir_needs_refresh
+
     ldx #0
-    jsr zsmkit::zsm_stop
+    jsr zsmkit::zsm_close
     jsr dir_not_playing
     stz playback_mode
     jsr hide_sprites

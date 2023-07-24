@@ -1561,9 +1561,9 @@ volume:
 pan:
     ldx midichannel_iter
     lda tmp1
-    cmp #$60
+    cmp #$70
     bcs @right
-    cmp #$20
+    cmp #$10
     bcc @left
 
     lda #3

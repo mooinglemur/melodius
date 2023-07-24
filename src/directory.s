@@ -3,9 +3,13 @@
 .export init_directory
 .export dirlist_nav_down
 .export dirlist_nav_up
+.export dirlist_nav_home
+.export dirlist_nav_end
 .export dirlist_exec
 .export dir_needs_refresh
 .export dir_not_playing
+.export set_dir_box_size
+.export check_lazy_load
 
 .export files_full_size
 
@@ -19,6 +23,9 @@
 .import playback_mode
 
 .import hide_sprites
+.import draw_file_box
+.import draw_pianos
+.import setup_instruments
 
 .include "x16.inc"
 
@@ -31,7 +38,8 @@
 .endscope
 
 DIR_BANK = 2
-LOAD_BANK = 3
+SORT_BANK = 3
+LOAD_BANK = 4
 
 .segment "ZEROPAGE"
 dptr:
@@ -49,18 +57,122 @@ cplaying:
     .res 2
 preserved_name:
     .res 256
-fn_buf:
-    .res 256
 files_bottom_size:
     .res 1
 files_top_size:
     .res 1
 files_full_size:
     .res 1
+files_width:
+    .res 1
 dir_needs_refresh:
     .res 1
-
+tmp3:
+    .res 3
+is_lazy_loading:
+    .res 1
 .segment "CODE"
+stat_cmd:
+    .byte "$=T:"
+fn_buf:
+    .res 256
+
+.scope loader
+reset:
+    stz PTR
+    lda #$a0
+    sta PTR+1
+    lda X16::Reg::RAMBank
+    sta BK
+    rts
+
+loadchr:
+    pha
+    lda BK
+    sta X16::Reg::RAMBank
+    pla
+    sta $a000
+PTR = * - 2
+    inc PTR
+    bne :+
+    inc PTR+1
+    lda PTR+1
+    cmp #$c0
+    bcc :+
+    sbc #$20
+    sta PTR+1
+    lda BK
+    inc
+    sta X16::Reg::RAMBank
+    sta BK
+:   rts
+
+set_lfn:
+    sta LFN
+    rts
+
+load_block:
+    jsr X16::Kernal::CLRCHN
+    ldx #$00
+LFN = * - 1
+    jsr X16::Kernal::CHKIN
+    lda #$00
+BK = * - 1
+    sta X16::Reg::RAMBank
+    lda #0
+    ldx PTR
+    ldy PTR+1
+    clc
+    jsr X16::Kernal::MACPTR
+    bcs @err
+    txa
+    adc PTR
+    sta PTR
+    tya
+    adc PTR+1
+    cmp #$c0
+    bcc :+
+    sbc #$20
+:   sta PTR+1
+    lda X16::Reg::RAMBank
+    sta BK
+    jsr X16::Kernal::READST
+    and #$40
+    pha
+    jsr X16::Kernal::CLRCHN
+    pla
+    clc
+    rts
+@err:
+    sec
+    rts
+
+load_remainder:
+    jsr load_block
+    beq load_remainder
+    php
+    lda LFN
+    jsr X16::Kernal::CLOSE
+    plp
+    rts
+
+.endscope
+
+
+.proc check_lazy_load
+    lda is_lazy_loading
+    beq done
+
+    jsr loader::load_block
+    beq done
+    stz is_lazy_loading
+    lda #2
+    jsr X16::Kernal::CLOSE
+
+done:
+    rts
+.endproc
+
 
 .proc dir_not_playing
     stz cplaying+1
@@ -84,6 +196,22 @@ dir_needs_refresh:
     cmp mfiles
     bcs isfile
 isdir:
+    ; before chdir, let's see where we are
+    ; and store it in preserved_name
+    ; but only if we're attempting to load ".."
+    stz preserved_name
+
+    ldy #2
+dotdotck:
+    lda (dptr),y
+    cmp dotdot,y
+    bne dochdir
+    dey
+    bpl dotdotck
+
+    jsr loadcwd
+
+dochdir:
     ; chdir
     lda #'C'
     sta fn_buf
@@ -96,7 +224,7 @@ isdir:
     sta fn_buf+3,y
     beq donedir
     iny
-    bra :-
+    bne :-
 donedir:
     tya
     clc
@@ -135,6 +263,12 @@ isfile:
     cmp #2
     jeq waszsm
 loadnewfile:
+    lda is_lazy_loading
+    beq :+
+    stz is_lazy_loading
+    lda #2
+    jsr X16::Kernal::CLOSE
+:
     ; set as playing file
     lda dptr
     sta cplaying
@@ -147,74 +281,239 @@ loadnewfile:
     sta fn_buf,y
     beq fn_done
     iny
-    bra :-
+    bne :-
 fn_done:
-    tya
-    ldx #<fn_buf
-    ldy #>fn_buf
-    jsr X16::Kernal::SETNAM
-
-    lda #1
-    ldx #8
-    ldy #2
-    jsr X16::Kernal::SETLFS
-    
-    lda #LOAD_BANK
-    sta X16::Reg::RAMBank
-
-    lda #0
-    ldx #$00
-    ldy #$a0
-    jsr X16::Kernal::LOAD
-
-    lda #LOAD_BANK
-    sta X16::Reg::RAMBank
-
-    lda $a000
-    cmp #$4d
-    bne notmidi
-
-    lda $a001
-    cmp #$54
-    bne notmidi
-
-    lda $a002
-    cmp #$68
-    bne notmidi
-
-    lda $a003
-    cmp #$64
-    bne notmidi
-
-    lda #LOAD_BANK
-    ldx #$00
-    ldy #$a0
-    jsr midi_parse
+    sty tmp_len
 
     JSRFAR AudioAPI::ym_init, $0a
 
-    jsr midi_restart
-    lda #1
-    jsr midi_play
+    lda #LOAD_BANK
+    sta X16::Reg::RAMBank
 
-    lda #1
-    sta playback_mode
+    ; get the file's size
+
+    lda tmp_len
+    clc
+    adc #4
+    ldx #<stat_cmd
+    ldy #>stat_cmd
+
+    jsr X16::Kernal::SETNAM
+
+    jsr check_size_from_listing
+    bcc :+
+    lda #7
+    jsr X16::Kernal::BSOUT
+    jmp dir_not_playing
+
+:   ; open the file to see what it is
+    ; load it along the way
+    lda #LOAD_BANK
+    sta X16::Reg::RAMBank
+
+    ldx #<fn_buf
+    ldy #>fn_buf
+    lda tmp_len
+
+    jsr X16::Kernal::SETNAM
+
+    lda #2
+    ldx #8
+    ldy #2
     
-    inc dir_needs_refresh
+    jsr X16::Kernal::SETLFS
 
+    jsr X16::Kernal::OPEN
+
+    ldx #2
+    jsr X16::Kernal::CHKIN
+
+    jsr loader::reset
+    lda #2
+    jsr loader::set_lfn
+
+    jsr X16::Kernal::CHRIN
+    cmp #'z'
+    beq maybe_zsm
+    cmp #'M'
+    beq maybe_midi
+    bra err
+plaerr:
+    pla
+err:
+    jsr X16::Kernal::CLRCHN
+    lda #2
+    jsr X16::Kernal::CLOSE
+    jsr dir_not_playing
+    lda #$07
+    jsr X16::Kernal::BSOUT
+    sec
     rts
-notmidi:
-    lda $a000
-    cmp #$7a
-    bne notzsm
-
-    lda $a001
-    cmp #$6d
-    bne notzsm
-
-    lda $a002
+maybe_midi:
+    jsr loader::loadchr
+    jsr X16::Kernal::CHRIN
+    cmp #'T'
+    bne err
+    jsr loader::loadchr
+    jsr X16::Kernal::CHRIN
+    cmp #'h'
+    bne err
+    jsr loader::loadchr
+    jmp load_midi
+maybe_zsm:
+    jsr loader::loadchr
+    jsr X16::Kernal::CHRIN
+    cmp #'m'
+    bne err
+    jsr loader::loadchr
+    jsr X16::Kernal::CHRIN
     cmp #$01
-    bne notzsm
+    bne err
+    jsr loader::loadchr
+
+    ; eat 3 bytes (loop point)
+    ldx #3
+eat_loop:
+    jsr X16::Kernal::CHRIN
+    jsr loader::loadchr
+    jsr X16::Kernal::READST
+    and #$40
+    bne err
+    dex
+    bne eat_loop
+
+
+    ; grab the PCM offset
+    ldx #3
+eat_pcmoff:
+    jsr X16::Kernal::CHRIN
+    sta tmp3-1,x
+    jsr loader::loadchr
+    jsr X16::Kernal::READST
+    and #$40
+    bne err
+    dex
+    bne eat_pcmoff
+
+    lda tmp3
+    ora tmp3+1
+    ora tmp3+2
+    bne zsm_load_remainder
+
+    lda #$80
+    sta is_lazy_loading
+
+    ldx #6
+preload_loop:
+    phx
+    jsr loader::load_block
+    plx
+    bcc :+
+    lda #2
+    jsr X16::Kernal::CLOSE
+    stz is_lazy_loading
+    rts
+:   cmp #0
+    bne close_zsm_continue ; very short ZSM fully loaded
+    dex
+    bne preload_loop
+    bra zsm_continue
+
+zsm_load_remainder:
+    ; ZSM has PCM data.  We will simply load it in full
+    ; now before returning control
+
+    jsr loader::load_remainder
+    bcc zsm_continue
+    rts
+
+close_zsm_continue:
+    lda #2
+    jsr X16::Kernal::CLOSE
+    stz is_lazy_loading
+
+zsm_continue:
+    ; ZSM successful, resize window as such
+    ldx #34
+    ldy #7
+    jsr draw_file_box
+    jsr show_directory
+
+
+    ; draw pianos
+    ldx #12
+    ldy #13
+    lda #0
+piano_loop1:
+    jsr draw_pianos
+    sta Vera::Reg::Data0 ; this puts the number under the pianos
+    inx
+    inc
+    cmp #16
+    bcc piano_loop1
+
+    lda #0
+    ldx #3
+piano_loop2:
+    jsr draw_pianos
+    sta Vera::Reg::Data0 ; this puts the number under the pianos
+    inx
+    inc
+    cmp #8
+    bcc piano_loop2
+
+    ; draw window for PCM
+    VERA_SET_ADDR $87ba, 8
+    lda #$20
+    ldx #9
+:   sta Vera::Reg::Data0
+    dex
+    bne :-
+
+    ; legend text
+    ldy #7
+    ldx #56 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop1:
+    lda legend1,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop1
+:
+
+    ldy #32
+    ldx #56 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop2:
+    lda legend2,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop2
+:
+
+
+    ldy #61
+    ldx #34 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop3:
+    lda legend3,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop3
+:
+
 
     lda #LOAD_BANK
     sta X16::Reg::RAMBank
@@ -233,7 +532,44 @@ notmidi:
     inc dir_needs_refresh
 
     rts
-notzsm:
+load_midi:
+    jsr loader::load_remainder
+
+    ; MIDI successful, resize window as such
+    ldx #15
+    ldy #20
+    jsr draw_file_box
+    jsr show_directory
+
+    ldx #21
+    ldy #13
+    lda #0
+piano_loop3:
+    jsr draw_pianos
+    sta Vera::Reg::Data0 ; this puts the number under the pianos
+    inx
+    inc
+    cmp #16
+    bcc piano_loop3
+
+    jsr setup_instruments
+
+    lda #LOAD_BANK
+    ldx #$00
+    ldy #$a0
+    jsr midi_parse
+
+    jsr midi_restart
+    lda #1
+    jsr midi_play
+
+    lda #1
+    sta playback_mode
+    
+    inc dir_needs_refresh
+
+    rts
+notmidi:
     stz cplaying+1
     stz playback_mode
     rts
@@ -246,8 +582,12 @@ waszsm:
     jsr hide_sprites
     stz playback_mode
     ldx #0
-    jsr zsmkit::zsm_stop
+    jsr zsmkit::zsm_close
     jmp loadnewfile
+dotdot:
+    .byte "..",0
+tmp_len:
+    .byte 0
 .endproc
 
 .proc dirlist_nav_up
@@ -303,6 +643,21 @@ exit:
     rts
 .endproc
 
+.proc dirlist_nav_home
+    lda #$a0
+    sta cactive+1
+    stz cactive
+    inc dir_needs_refresh
+    rts
+.endproc
+
+.proc dirlist_nav_end
+    lda #255
+    jsr dirlist_nav_down
+    bcc dirlist_nav_end
+    rts
+.endproc
+
 .proc dirlist_nav_down
     cmp #0
     beq exit
@@ -323,6 +678,7 @@ findloop:
     inc dptr+1
 :   bra findloop
 bottom_check:
+    sec
     ldy #1
     lda (dptr),y
     beq done
@@ -335,6 +691,7 @@ bottom_check:
     sta cactive+1
     dex
     bne findloop
+    clc
 done:
     inc dir_needs_refresh
 exit:
@@ -533,7 +890,7 @@ isfile:
     lda #$9c
 :   jsr X16::Kernal::CHROUT
 printit:
-    ldx #30
+    ldx files_width
     lda (dptr)
     beq early_end
 chrloop:
@@ -659,10 +1016,13 @@ name_next:
     inc dptr+1
 :   lda (dptr)
     bne name_next
-    ldy #0
+    ldy #1
     lda (dptr),y
     beq name_notfound
-    bra name_new_row
+    inc dptr
+    bne :+
+    inc dptr+1
+:   bra name_new_row
 
 dirfn:
     .byte "$=T:=D"
@@ -670,7 +1030,149 @@ filefn:
     .byte "$=T:=P"
 .endproc
 
+
 .proc loaddir
+    lda #1
+    ldx #8
+    ldy #0
+
+    jsr X16::Kernal::SETLFS
+    jsr X16::Kernal::OPEN
+
+    ldx #1
+    jsr X16::Kernal::CHKIN
+
+    ; eat the load address, line number, and next line
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+
+    ; get past the header
+    ; look for the first open quote mark
+hoq_loop:
+    jsr X16::Kernal::CHRIN
+    pha
+    jsr X16::Kernal::READST
+    and #$40
+    bne plaerr
+    pla
+    cmp #$22
+    bne hoq_loop
+    bra nul_loop
+plaerr:
+    pla
+    jsr X16::Kernal::CLRCHN
+    lda #1
+    jsr X16::Kernal::CLOSE
+    rts
+
+    ; now we keep going until EOL
+nul_loop:
+    jsr X16::Kernal::CHRIN
+    pha
+    jsr X16::Kernal::READST
+    and #$40
+    bne plaerr
+    pla
+    bne nul_loop
+
+    ; eat the line number and next line
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::CHRIN
+
+    ; look for the open quote mark
+oq_loop:
+    jsr X16::Kernal::CHRIN
+    pha
+    jsr X16::Kernal::READST
+    and #$40
+    bne plaerr
+    pla
+    cmp #$22
+    bne oq_loop
+
+    ; absorb the name until the close quote
+name_loop:
+    jsr X16::Kernal::CHRIN
+    pha
+    jsr X16::Kernal::READST
+    and #$40
+    bne plaerr
+    pla
+    cmp #$22
+    beq dotcheck
+
+    sta (dptr)
+    inc dptr
+    bne name_loop
+    inc dptr+1
+    bra name_loop
+
+dotcheck:
+    lda #0
+    sta (dptr)
+    ; skip filename if it's "."
+    ; first, back up by 2
+    lda dptr
+    sec
+    sbc #2
+    sta dptr
+    bcs :+
+    dec dptr+1
+    ; now check to see if we underflowed the pointer out of 
+    ; banked ram
+:   lda dptr+1
+    cmp #$a0
+    bcs :+
+    ; we underflowed
+    ; check to see if $a000 is a dot
+    lda $a000
+    cmp #'.'
+    ; apparently a single character filename at the top of the directory
+    ; that is not a dot
+    bne wasok
+    ; is a dot, reset
+    stz dptr
+    lda #$a0
+    sta dptr+1
+    bra nul_loop
+:   ; if directory just read is ".", then the sequence will be "\0.\0"
+    lda (dptr)
+    bne wasok
+    ldy #1
+    lda (dptr),y
+    cmp #'.'
+    bne wasok
+    ; next byte is definitely null since we're here
+    ; we just placed "." as a directory name
+    inc dptr
+    bne :+
+:   inc dptr+1
+    bra nul_loop
+wasok:    
+    lda dptr
+    clc
+    adc #3
+    sta dptr
+    bcc :+
+    inc dptr+1
+:   jmp nul_loop
+
+
+.endproc
+
+.proc loadcwd
+    lda #3
+    ldx #<cwdfn
+    ldy #>cwdfn
+
+    jsr X16::Kernal::SETNAM
+
     lda #1
     ldx #8
     ldy #0
@@ -729,6 +1231,7 @@ oq_loop:
     bne oq_loop
 
     ; absorb the name until the close quote
+    ldx #0
 name_loop:
     jsr X16::Kernal::CHRIN
     pha
@@ -739,37 +1242,158 @@ name_loop:
     cmp #$22
     beq cq
 
-    sta (dptr)
-    inc dptr
-    bne name_loop
-    inc dptr+1
+    sta preserved_name,x
+    inx
     bra name_loop
 cq:
-    lda #0
-    sta (dptr)
-    inc dptr
-    bne nul_loop
-    inc dptr+1
-    bra nul_loop
-
+    pha
 plaerr:
+    stz preserved_name,x
     pla
     jsr X16::Kernal::CLRCHN
     lda #1
     jsr X16::Kernal::CLOSE
     rts
+cwdfn:
+    .byte "$=C"
+.endproc
 
+; Expects setnam to be done, will open and parse the directory
+; checking the size of the file.  If it's larger than
+; the number of free RAM banks, we return carry set
+; which indicates not enough room for the file or there was
+; another error, otherwise carry is clear.
+;
+; This routine parses the block size that comes back from the listing
+.proc check_size_from_listing
+    lda #1
+    ldx #8
+    ldy #0
+
+    jsr X16::Kernal::SETLFS
+
+    lda #0
+    jsr X16::Kernal::OPEN
+
+    ; eat the header until the first open quote
+    ; get past the header
+    ; look for the first open quote mark
+    ldx #1
+    jsr X16::Kernal::CHKIN
+
+hoq_loop:
+    jsr X16::Kernal::CHRIN
+    pha
+    jsr X16::Kernal::READST
+    and #$40
+    bne plaerr
+    pla
+    cmp #$22
+    bne hoq_loop
+    bra nul_loop
+plaerr:
+    pla
+err:
+    jsr X16::Kernal::CLRCHN
+    lda #1
+    jsr X16::Kernal::CLOSE
+    sec
+    rts
+
+    ; now we keep going until EOL
+nul_loop:
+    jsr X16::Kernal::CHRIN
+    pha
+    jsr X16::Kernal::READST
+    and #$40
+    bne plaerr
+    pla
+    bne nul_loop
+
+    ; eat the link
+.repeat 2
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::READST
+    and #$40
+    bne err
+.endrepeat
+
+    ; here's the line number
+    jsr X16::Kernal::CHRIN
+    sta blk
+    jsr X16::Kernal::READST
+    and #$40
+    bne err
+    jsr X16::Kernal::CHRIN
+    sta blk+1
+    jsr X16::Kernal::READST
+    and #$40
+    bne err
+
+    jsr X16::Kernal::CLRCHN
+    lda #1
+    jsr X16::Kernal::CLOSE
+
+    ; blk has the block size
+    ; we want number of 8 k
+    ; banks
+    lda blk+1
+.repeat 5
+    lsr
+    ror blk
+.endrepeat
+    cmp #0
+    bne no ; more than 256 8k banks worth
+    ; get the number of 8k banks in the system
+    sec
+    jsr X16::Kernal::MEMTOP
+    sec
+    sbc #4 ; take away the number of banks used by the system and Melodius
+           ; this has the nice side effect of 256 banks (0) becoming 252
+    cmp blk
+    bcc no
+ok:
+    clc
+    rts
+no:
+    sec
+    rts
+blk:
+    .word 0
 .endproc
 
 .proc init_directory
     stz preserved_name
     stz dir_needs_refresh
     stz cplaying+1
-    lda #19
+    stz is_lazy_loading
+    rts
+.endproc
+
+.proc set_dir_box_size
+    stx files_width
+    tya
+    lsr
+    dec
     sta files_top_size
-    lda #19
     sta files_bottom_size
-    lda #39
+    tya
+    dec
     sta files_full_size
     rts
 .endproc
+
+legend1:
+    .byte $90,$01,$05,"YM2151 CHANNEL",0
+
+legend2:
+    .byte "VERA PSG CHANNEL",0
+
+legend3:
+    .byte 'V',$11,$9d
+    .byte 'E',$11,$9d
+    .byte 'R',$11,$9d
+    .byte 'A',$11,$11,$9d
+    .byte 'P',$11,$9d
+    .byte 'C',$11,$9d
+    .byte 'M',0               
