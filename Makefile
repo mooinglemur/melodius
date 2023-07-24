@@ -35,7 +35,7 @@ $(SDCARD): $(EXE)
 	truncate -s 100M $(SDCARD)
 	parted -s $(SDCARD) mklabel msdos mkpart primary fat32 2048s -- -1
 	mformat -i $(SDCARD)@@1M -v $(call UC,$(PROJECT)) -F
-	mcopy -i $(SDCARD)@@1M -o -m $(EXE) ::
+	cp $(EXE) ROOT/
 	mcopy -i $(SDCARD)@@1M -o -s -v -m ROOT/* ::
 
 .PHONY: clean run
