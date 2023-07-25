@@ -10,8 +10,16 @@
 .export dir_not_playing
 .export set_dir_box_size
 .export check_lazy_load
+.export loader_get_ptr
+.export zsm_callback
+.export legend_jukebox
+.export loadnext
 
 .export files_full_size
+.export loopctr
+.export jukebox
+.export stopping
+.export atten
 
 .macpack longbranch
 
@@ -26,6 +34,8 @@
 .import draw_file_box
 .import draw_pianos
 .import setup_instruments
+.import draw_loader_ptr
+.import draw_zsm_loop_ptr
 
 .include "x16.inc"
 
@@ -71,6 +81,14 @@ tmp3:
     .res 3
 is_lazy_loading:
     .res 1
+loopctr:
+    .res 1
+jukebox:
+    .res 1
+stopping:
+	.res 1
+atten:
+	.res 1
 .segment "CODE"
 stat_cmd:
     .byte "$=T:"
@@ -140,6 +158,7 @@ BK = * - 1
     and #$40
     pha
     jsr X16::Kernal::CLRCHN
+    jsr draw_loader_ptr
     pla
     clc
     rts
@@ -156,8 +175,15 @@ load_remainder:
     plp
     rts
 
+loader_get_ptr:
+    lda BK
+    ldx PTR
+    ldy PTR+1
+    rts
+
 .endscope
 
+loader_get_ptr := loader::loader_get_ptr
 
 .proc check_lazy_load
     lda is_lazy_loading
@@ -168,16 +194,100 @@ load_remainder:
     stz is_lazy_loading
     lda #2
     jsr X16::Kernal::CLOSE
-
 done:
     rts
 .endproc
 
+.proc legend_jukebox
+    ldx #4
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+legloop:
+    lda legend,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legloop
+
+:   lda jukebox
+    beq off
+    lda #'N'
+    jsr X16::Kernal::BSOUT
+    lda #' '
+    jsr X16::Kernal::BSOUT
+    bra end
+off:
+    lda #'F'
+    jsr X16::Kernal::BSOUT
+    jsr X16::Kernal::BSOUT
+end:
+    rts
+legend:
+    .byte $90,$01,$05,"[F1] TOGGLE JUKEBOX MODE: O",0
+.endproc
 
 .proc dir_not_playing
     stz cplaying+1
     inc dir_needs_refresh
     rts
+.endproc
+
+.proc loadnext
+    lda #DIR_BANK
+    sta X16::Reg::RAMBank
+
+    lda tries
+    cmp #2
+    bcc :+
+    stz tries
+    rts ; failout
+:
+
+    lda cplaying+1
+    beq top
+    sta dptr+1
+    lda cplaying
+    sta dptr
+
+    ; find the next null
+nul_loop:
+    inc dptr
+    bne :+
+    inc dptr+1
+:   lda (dptr)
+    bne nul_loop
+
+    inc dptr
+    bne :+
+    inc dptr+1
+:   lda (dptr)
+    beq top
+
+    lda dptr
+    lda dptr+1
+    bra end
+
+top:
+    inc tries
+    lda mfiles
+    sta dptr
+    lda mfiles+1
+    sta dptr+1
+
+    lda (dptr)
+    bne end
+    ; directory has no files whatsoever
+    sec
+    rts
+end:
+    jsr dirlist_exec_dptr
+    bcs loadnext
+    stz tries
+    rts
+tries:
+    .byte 0
 .endproc
 
 .proc dirlist_exec
@@ -188,11 +298,25 @@ done:
     sta dptr
     lda cactive+1
     sta dptr+1
+    
+    jsr dirlist_exec_dptr
+    bcs :+
+    rts
+:
+    jsr dir_not_playing
+    lda #$07
+    jsr X16::Kernal::BSOUT
+    sec
+    rts
+.endproc
+
+.proc dirlist_exec_dptr
+    lda dptr+1
     cmp mfiles+1
     bcc isdir
     beq :+
     bcs isfile
-:   lda cactive
+:   lda dptr
     cmp mfiles
     bcs isfile
 isdir:
@@ -302,9 +426,7 @@ fn_done:
 
     jsr check_size_from_listing
     bcc :+
-    lda #7
-    jsr X16::Kernal::BSOUT
-    jmp dir_not_playing
+    rts
 
 :   ; open the file to see what it is
     ; load it along the way
@@ -344,9 +466,6 @@ err:
     jsr X16::Kernal::CLRCHN
     lda #2
     jsr X16::Kernal::CLOSE
-    jsr dir_not_playing
-    lda #$07
-    jsr X16::Kernal::BSOUT
     sec
     rts
 maybe_midi:
@@ -371,73 +490,13 @@ maybe_zsm:
     bne err
     jsr loader::loadchr
 
-    ; eat 3 bytes (loop point)
-    ldx #3
-eat_loop:
-    jsr X16::Kernal::CHRIN
-    jsr loader::loadchr
-    jsr X16::Kernal::READST
-    and #$40
-    bne err
-    dex
-    bne eat_loop
-
-
-    ; grab the PCM offset
-    ldx #3
-eat_pcmoff:
-    jsr X16::Kernal::CHRIN
-    sta tmp3-1,x
-    jsr loader::loadchr
-    jsr X16::Kernal::READST
-    and #$40
-    bne err
-    dex
-    bne eat_pcmoff
-
-    lda tmp3
-    ora tmp3+1
-    ora tmp3+2
-    bne zsm_load_remainder
-
-    lda #$80
-    sta is_lazy_loading
-
-    ldx #6
-preload_loop:
-    phx
-    jsr loader::load_block
-    plx
-    bcc :+
-    lda #2
-    jsr X16::Kernal::CLOSE
-    stz is_lazy_loading
-    rts
-:   cmp #0
-    bne close_zsm_continue ; very short ZSM fully loaded
-    dex
-    bne preload_loop
-    bra zsm_continue
-
-zsm_load_remainder:
-    ; ZSM has PCM data.  We will simply load it in full
-    ; now before returning control
-
-    jsr loader::load_remainder
-    bcc zsm_continue
-    rts
-
-close_zsm_continue:
-    lda #2
-    jsr X16::Kernal::CLOSE
-    stz is_lazy_loading
-
-zsm_continue:
-    ; ZSM successful, resize window as such
+    ; assuming this is ZSM
+    ; resize window as such
     ldx #34
     ldy #7
     jsr draw_file_box
     jsr show_directory
+    jsr legend_jukebox
 
 
     ; draw pianos
@@ -514,6 +573,86 @@ lloop3:
     bne lloop3
 :
 
+    ldy #68
+    ldx #30 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop4:
+    lda legend4,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop4
+:
+
+
+
+    ; eat 3 bytes (loop point)
+    ldx #3
+eat_loop:
+    jsr X16::Kernal::CHRIN
+    jsr loader::loadchr
+    jsr X16::Kernal::READST
+    and #$40
+    jne err
+    dex
+    bne eat_loop
+
+
+    ; grab the PCM offset
+    ldx #3
+eat_pcmoff:
+    jsr X16::Kernal::CHRIN
+    sta tmp3-1,x
+    jsr loader::loadchr
+    jsr X16::Kernal::READST
+    and #$40
+    jne err
+    dex
+    bne eat_pcmoff
+
+    lda tmp3
+    ora tmp3+1
+    ora tmp3+2
+    bne zsm_load_remainder
+
+    lda #$80
+    sta is_lazy_loading
+
+    ldx #6
+preload_loop:
+    phx
+    jsr loader::load_block
+    plx
+    bcc :+
+    lda #2
+    jsr X16::Kernal::CLOSE
+    stz is_lazy_loading
+    sec
+    rts
+:   cmp #0
+    bne close_zsm_continue ; very short ZSM fully loaded
+    dex
+    bne preload_loop
+    bra zsm_continue
+
+zsm_load_remainder:
+    ; ZSM has PCM data.  We will simply load it in full
+    ; now before returning control
+
+    jsr loader::load_remainder
+    bcc zsm_continue
+    rts
+
+close_zsm_continue:
+    lda #2
+    jsr X16::Kernal::CLOSE
+    stz is_lazy_loading
+
+zsm_continue:
+
 
     lda #LOAD_BANK
     sta X16::Reg::RAMBank
@@ -523,23 +662,33 @@ lloop3:
     ldy #$a0
     jsr zsmkit::zsm_setmem
 
+    stz loopctr
+    stz stopping
+    stz atten
+
+	ldx #0
+	lda #0
+	jsr zsmkit::zsm_setatten
+
     ldx #0
     jsr zsmkit::zsm_play
 
     lda #2
     sta playback_mode
 
+    jsr draw_zsm_loop_ptr
+
     inc dir_needs_refresh
 
+    clc
     rts
 load_midi:
-    jsr loader::load_remainder
-
-    ; MIDI successful, resize window as such
+    ; is MIDI, resize window as such
     ldx #15
     ldy #20
     jsr draw_file_box
     jsr show_directory
+    jsr legend_jukebox
 
     ldx #21
     ldy #13
@@ -551,6 +700,10 @@ piano_loop3:
     inc
     cmp #16
     bcc piano_loop3
+
+    lda #$11
+    sta playback_mode
+    jsr loader::load_remainder
 
     jsr setup_instruments
 
@@ -565,13 +718,10 @@ piano_loop3:
 
     lda #1
     sta playback_mode
-    
+
     inc dir_needs_refresh
 
-    rts
-notmidi:
-    stz cplaying+1
-    stz playback_mode
+    clc
     rts
 wasmidi:
     jsr hide_sprites
@@ -926,6 +1076,7 @@ padded_row:
     cmp files_full_size
     jeq rowloop
     jcc rowloop
+    clc
     rts
 early_end:
     lda dptr
@@ -1064,6 +1215,7 @@ hoq_loop:
     bra nul_loop
 plaerr:
     pla
+err:
     jsr X16::Kernal::CLRCHN
     lda #1
     jsr X16::Kernal::CLOSE
@@ -1161,9 +1313,15 @@ wasok:
     sta dptr
     bcc :+
     inc dptr+1
-:   jmp nul_loop
-
-
+:   lda dptr+1
+    cmp #$bf
+    beq maybe_stop_here
+    jmp nul_loop
+maybe_stop_here:
+    ; we're getting very close to the end of the bank
+    ; let's just not load any more
+    jmp err
+    
 .endproc
 
 .proc loadcwd
@@ -1367,6 +1525,8 @@ blk:
     stz dir_needs_refresh
     stz cplaying+1
     stz is_lazy_loading
+    stz loopctr
+    stz jukebox
     rts
 .endproc
 
@@ -1380,6 +1540,14 @@ blk:
     tya
     dec
     sta files_full_size
+    rts
+.endproc
+
+.proc zsm_callback
+    cpy #1
+    bne end
+    sta loopctr
+end:
     rts
 .endproc
 
@@ -1397,3 +1565,8 @@ legend3:
     .byte 'P',$11,$9d
     .byte 'C',$11,$9d
     .byte 'M',0               
+
+legend4:
+    .byte $9e,"LOOP",$11,$11,$11,$9d,$9d,$9d,$9d,$9d
+    .byte "CURSOR",$11,$11,$11,$9d,$9d,$9d,$9d,$9d,$9d
+    .byte "LOADED",$05,0

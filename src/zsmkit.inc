@@ -28,3 +28,13 @@
 .import opm_key_shadow
 .import opm_shadow
 .import pcm_busy
+
+.import zsm_ptr_bank
+.import zsm_ptr_l
+.import zsm_ptr_h
+
+.import zsm_loop_bank
+.import zsm_loop_l
+.import zsm_loop_h
+
+.import loop_enable
