@@ -304,6 +304,7 @@ tries:
     rts
 :
     jsr dir_not_playing
+    stz playback_mode
     lda #$07
     jsr X16::Kernal::BSOUT
     sec

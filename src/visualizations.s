@@ -16,6 +16,7 @@
 .import playback_mode
 
 .import ymnote, yminst, ymmidi, midibend, ympan, midiinst
+.import lyrics
 .export update_instruments
 .export do_midi_sprites
 .export do_zsm_sprites
@@ -28,6 +29,7 @@
 .export draw_loader_ptr
 .export draw_zsm_ptr
 .export draw_zsm_loop_ptr
+.export draw_lyric
 
 .segment "BSS"
 
@@ -515,6 +517,34 @@ oldrows:
 	.byte 0
 oldcols:
 	.byte 0
+.endproc
+
+
+.proc draw_lyric: near
+	ldx #29
+	ldy #42
+	clc
+	jsr X16::Kernal::PLOT
+
+	lda #$90
+	jsr X16::Kernal::BSOUT
+	lda #$01
+	jsr X16::Kernal::BSOUT
+	lda #$9f
+	jsr X16::Kernal::BSOUT
+
+	ldx #0
+:	lda lyrics,x
+	jsr X16::Kernal::BSOUT
+	inx
+	cpx #32
+	bcc :-
+
+	; get out of possible quote mode
+	lda #13
+	jsr X16::Kernal::BSOUT
+
+	rts
 .endproc
 
 .proc setup_instruments: near

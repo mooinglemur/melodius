@@ -8,6 +8,7 @@
 .export midi_stop
 
 .export ymnote, yminst, ymmidi, midibend, ympan, midiinst
+.export lyrics
 
 .import divide40_24
 .import multiply16x16
@@ -63,6 +64,8 @@
     calls_per_frame       .byte ; any value besides 2 behaves like 1
     playing               .byte
     tempochange           .byte ; flag to adjust deltas at the end of the tick
+    deltas_processed_frac .byte
+    deltas_processed      .dword ; how far along in the song are we?
 .endstruct
 
 .struct MIDIChannel
@@ -121,6 +124,8 @@ variable_length:
     .res 4
 tracks_playing:
     .res 1
+lyrics:
+    .res 32
 tmp1:
     .res 1 ; assumed free to use at all times but unsafe after jsr
 tmp2:
@@ -489,7 +494,7 @@ mloop:
     cpx #MIDI_CHANNELS
     bcc mloop
 
-
+    jsr clear_lyrics
 
     stz track_iter
 trackloop:
@@ -544,6 +549,12 @@ trackloop:
     lda #^(DEFAULT_TEMPO)
     sta midistate + MIDIState::tempo+2
     stz midistate + MIDIState::tempo+3
+
+    stz midistate + MIDIState::deltas_processed_frac
+    stz midistate + MIDIState::deltas_processed+0
+    stz midistate + MIDIState::deltas_processed+1
+    stz midistate + MIDIState::deltas_processed+2
+    stz midistate + MIDIState::deltas_processed+3
 
     ; This routine clobbers Y but we're done using it
     jsr calc_deltas_per_call
@@ -834,6 +845,23 @@ tccloop:
     cpx #YM2151_CHANNELS
     bcc tccloop
 
+; cumulative deltas
+    lda midistate + MIDIState::deltas_per_call_frac
+    clc
+    adc midistate + MIDIState::deltas_processed_frac
+    sta midistate + MIDIState::deltas_processed_frac
+    lda midistate + MIDIState::deltas_per_call
+    adc midistate + MIDIState::deltas_processed
+    sta midistate + MIDIState::deltas_processed
+    lda midistate + MIDIState::deltas_per_call+1
+    adc midistate + MIDIState::deltas_processed+1
+    sta midistate + MIDIState::deltas_processed+1
+    bcc end_cumu_delta
+    inc midistate + MIDIState::deltas_processed+2
+    bne end_cumu_delta
+    inc midistate + MIDIState::deltas_processed+3
+
+end_cumu_delta:
     ; adjust tempo if it changed on this tick
     lda midistate + MIDIState::tempochange
     beq check_if_any_playing
@@ -1283,6 +1311,10 @@ drum:
     beq end_of_track
     cmp #$51
     beq tempo
+    cmp #$05
+    beq lyric
+    cmp #$01
+    beq lyric
 
     bra end
 end_of_track:
@@ -1325,8 +1357,56 @@ tempo:
 end:
     jsr advance_to_end_of_chunk
     rts
+lyric:
+    ; don't process first-tick text events
+    lda midistate + MIDIState::deltas_processed
+    ora midistate + MIDIState::deltas_processed+1
+    ora midistate + MIDIState::deltas_processed+2
+    ora midistate + MIDIState::deltas_processed+3
+    beq end
+@l1:
+    lda chunklen
+    ora chunklen+1
+    ora chunklen+2
+    beq end
+
+    jsr shift_lyrics
+    jsr fetch_indirect_byte_decchunk
+    cmp #$20
+    bcc @space
+    cmp #$7f
+    bcc @gol
+    lda #'?'
+    bra @gol
+@space:
+    lda #' '
+@gol:
+    sta lyrics+31
+    bra @l1
 .endproc
 
+.proc shift_lyrics: near
+    ldx #0
+@llp:
+    lda lyrics+1,x
+    sta lyrics,x
+    inx
+    cpx #31
+    bcc @llp
+    rts
+.endproc
+
+.proc clear_lyrics: near
+    ; clear lyrics buffer
+    ldx #32
+    lda #' '
+lyrloop:
+    sta lyrics-1,x
+    dex
+    bne lyrloop
+
+    rts
+.endproc
 
 .proc do_event_note_off: near
     and #$0F

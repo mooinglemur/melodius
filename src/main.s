@@ -59,6 +59,7 @@ playback_mode:
 .import zsm_callback
 .import stopping
 .import atten
+.import draw_lyric
 
 .include "macros.inc"
 
@@ -187,6 +188,7 @@ rekey:
 	cmp #$0d
 	bne :+
 	jsr dirlist_exec
+	jcs songstopped
 	bra rekey
 :
 endkey:
@@ -208,6 +210,7 @@ endkey:
 ismidi:
 	jsr do_midi_sprites
 	jsr update_instruments
+	jsr draw_lyric
 	jsr midi_is_playing
 	bne continue
 	lda jukebox
@@ -215,16 +218,10 @@ ismidi:
 	jsr loadnext
 	bcc continue
 stopmidi:
-	ldx #34
-	ldy #20
-	jsr draw_file_box
-	inc dir_needs_refresh
 
 	jsr midi_stop
-	jsr dir_not_playing
-	stz playback_mode
 	jsr hide_sprites
-	bra continue
+	bra songstopped
 iszsm:
 	jsr check_lazy_load
 	jsr draw_zsm_ptr
@@ -264,16 +261,16 @@ ckloadnext:
 	jsr loadnext
 	bcc continue
 stopzsm:
+	ldx #0
+	jsr zsmkit::zsm_close
+	jsr hide_sprites
+songstopped:
 	ldx #34
 	ldy #20
 	jsr draw_file_box
 	inc dir_needs_refresh
-
-	ldx #0
-	jsr zsmkit::zsm_close
 	jsr dir_not_playing
 	stz playback_mode
-	jsr hide_sprites
 continue:
 	DONE_BORDER
 
