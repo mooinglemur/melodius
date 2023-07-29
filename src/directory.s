@@ -14,6 +14,7 @@
 .export zsm_callback
 .export legend_jukebox
 .export loadnext
+.export sortdir
 
 .export files_full_size
 .export loopctr
@@ -53,6 +54,8 @@ LOAD_BANK = 4
 
 .segment "ZEROPAGE"
 dptr:
+    .res 2
+dptr2:
     .res 2
 .segment "BSS"
 mfiles:
@@ -94,6 +97,186 @@ stat_cmd:
     .byte "$=T:"
 fn_buf:
     .res 256
+
+.proc sortdir_section: near
+    ; bubble sort for now because it's simple to implement
+
+    ; reset pointer
+    stx begin
+    sty begin+1
+restart:
+    stx dptr
+    stx dptr2
+    sty dptr+1
+    sty dptr2+1
+    stz swapped
+
+    ; walk dptr2 forward by one element
+walk1:
+    inc dptr2
+    bne :+
+    inc dptr2+1
+:   lda (dptr2)
+    bne walk1
+    ; we're now at the null before the next element
+    ; increment once more
+    inc dptr2
+    bne :+
+    inc dptr2+1
+:   lda (dptr2) ; check for end of listing
+    jeq check_swapped
+    ; check if we're on the file/directory boundary
+    lda dptr2+1
+    cmp mfiles+1
+    bne sort_pair
+    lda dptr2
+    cmp mfiles
+    jeq check_swapped
+sort_pair:
+    ldy #0
+checkloop:
+    lda (dptr),y
+    cmp (dptr2),y
+    bcc walk2 ; pair is in the correct order
+    bne swapit ; pair is in the wrong order
+    ; equality
+    cmp #0 ; double-check we didn't reach the end
+    beq walk2 ; this would mean two identical entries, don't swap
+    iny
+    bra checkloop
+walk2:
+    lda dptr2
+    sta dptr
+    lda dptr2+1
+    sta dptr+1
+    bra walk1
+swapit:
+    stz tmp3 ; value in tmp3 indicates cplaying needs to swap forward
+    ; first check to see if cplaying needs swap
+    lda cplaying+1
+    cmp dptr2+1
+    bne cp1
+    lda cplaying
+    cmp dptr2
+    bne cp1
+    ; cplaying is on the second element, swap it to the first's location
+    lda dptr
+    sta cplaying
+    lda dptr+1
+    sta cplaying+1
+    bra ca2
+cp1:
+    lda cplaying+1
+    cmp dptr+1
+    bne ca2
+    lda cplaying
+    cmp dptr
+    bne ca2
+    inc tmp3
+ca2:
+    stz tmp3+1 ; value in tmp3+1 indicates cactive needs to swap forward
+    ; next check to see if cactive need swap
+    lda cactive+1
+    cmp dptr2+1
+    bne ca1
+    lda cactive
+    cmp dptr2
+    bne ca1
+    lda dptr
+    sta cactive
+    lda dptr+1
+    sta cactive+1
+    bra copyout
+ca1:
+    lda cactive+1
+    cmp dptr+1
+    bne copyout
+    lda cactive
+    cmp dptr
+    bne copyout
+    inc tmp3+1
+copyout:
+    ; copy the first name out
+    ldy #0
+cpylp:
+    lda (dptr),y
+    sta preserved_name,y
+    beq copy2to1
+    iny
+    bne cpylp
+copy2to1:
+    ; copy ptr2's data to ptr1's location
+    ldy #0
+cpy21lp:
+    lda (dptr2),y
+    sta (dptr),y
+    beq resetptr2
+    iny
+    bne cpy21lp
+resetptr2:
+    ; set ptr2 to the next spot, which should allow the preserved
+    ; name to fit
+    iny
+    tya
+    clc
+    adc dptr
+    sta dptr2
+    lda dptr+1
+    adc #0
+    sta dptr2+1
+    ldy #0
+    lda #1
+    sta swapped 
+cpypto2:
+    ; finish the swap
+    lda preserved_name,y
+    sta (dptr2),y
+    beq chkcp
+    iny
+    bne cpypto2
+    ; finish the cursor swaps if needed
+chkcp:
+    lda tmp3
+    beq chkca
+    lda dptr2
+    sta cplaying
+    lda dptr2+1
+    sta cplaying+2
+chkca:
+    lda tmp3+1
+    jeq walk2
+    lda dptr2
+    sta cactive
+    lda dptr2+1
+    sta cactive
+    jmp walk2
+check_swapped:
+    lda swapped
+    beq end
+    ldx begin
+    ldy begin+1
+    jmp restart
+end:
+    clc
+    rts
+begin:
+    .word 0
+swapped:
+    .byte 0
+.endproc
+
+.proc sortdir
+    lda #DIR_BANK
+    sta X16::Reg::RAMBank
+    ldx #$00
+    ldy #$a0
+    jsr sortdir_section
+    ldx mfiles
+    ldy mfiles+1
+    jsr sortdir_section
+    inc dir_needs_refresh
+    rts
+.endproc
 
 .scope loader
 reset:

@@ -60,6 +60,7 @@ playback_mode:
 .import stopping
 .import atten
 .import draw_lyric
+.import sortdir
 
 .include "macros.inc"
 
@@ -175,6 +176,12 @@ rekey:
 	bra rekey
 :
 
+	cmp #$73 ; S
+	bne :+
+	jsr sortdir
+	bra rekey
+:
+
 	cmp #$20 ; space
 	bne :+
 	lda playback_mode
@@ -189,7 +196,7 @@ rekey:
 	bne :+
 	jsr dirlist_exec
 	jcs songstopped
-	bra rekey
+	jmp rekey
 :
 endkey:
 	lda dir_needs_refresh
