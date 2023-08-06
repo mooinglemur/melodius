@@ -104,12 +104,20 @@ fn_buf:
     ; reset pointer
     stx begin
     sty begin+1
+
+    stx dptr
+    sty dptr+1
+
+:   lda (dptr) ; check for end of listing (empty section)
+    jeq end
+
 restart:
     stx dptr
-    stx dptr2
     sty dptr+1
+    stx dptr2
     sty dptr2+1
     stz swapped
+
 
     ; walk dptr2 forward by one element
 walk1:
