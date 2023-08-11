@@ -30,6 +30,7 @@
 .export draw_zsm_ptr
 .export draw_zsm_loop_ptr
 .export draw_lyric
+.export zsm_tuning
 
 .segment "BSS"
 
@@ -52,6 +53,8 @@ callcnt:
 midinote:
 	.res 1
 midifrac:
+	.res 1
+zsm_tuning:
 	.res 1
 
 .segment "ZEROPAGE"
@@ -957,6 +960,27 @@ sploop:
 	inc midinote
 :   sta midifrac ; signed
 
+
+	lda zsm_tuning
+	bpl subtuning
+	eor $ff
+	inc
+addtuning:
+	clc
+	adc midifrac
+	sta midifrac
+	bvc :+
+	inc midinote
+:	bra aftertuning
+subtuning:
+	lda midifrac
+	sec
+	sbc zsm_tuning
+	sta midifrac
+	bvc :+
+	dec midinote
+:
+aftertuning:
 	lda midinote
 	cmp #108
 high:
@@ -1189,6 +1213,28 @@ sploop:
 	bpl :+
 	inc midinote
 :   sta midifrac ; signed
+
+
+	lda zsm_tuning
+	bpl subtuning
+	eor $ff
+	inc
+addtuning:
+	clc
+	adc midifrac
+	sta midifrac
+	bvc :+
+	inc midinote
+:	bra aftertuning
+subtuning:
+	lda midifrac
+	sec
+	sbc zsm_tuning
+	sta midifrac
+	bvc :+
+	dec midinote
+:
+aftertuning:
 
 	lda midinote
 	cmp #108

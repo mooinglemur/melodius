@@ -37,6 +37,7 @@
 .import setup_instruments
 .import draw_loader_ptr
 .import draw_zsm_loop_ptr
+.import zsm_tuning
 
 .include "x16.inc"
 
@@ -857,6 +858,7 @@ zsm_continue:
     stz loopctr
     stz stopping
     stz atten
+    stz zsm_tuning
 
 	ldx #0
 	lda #0
@@ -1737,8 +1739,12 @@ blk:
 
 .proc zsm_callback
     cpy #1
-    bne end
+    bne :+
     sta loopctr
+    bra end
+:   cpy #3
+    bne end
+    sta zsm_tuning
 end:
     rts
 .endproc
