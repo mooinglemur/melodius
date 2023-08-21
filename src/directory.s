@@ -38,6 +38,8 @@
 .import draw_loader_ptr
 .import draw_zsm_loop_ptr
 .import zsm_tuning
+.import zsm_tuning_update
+.import clear_zsm_tuning
 
 .include "x16.inc"
 
@@ -58,10 +60,16 @@ dptr:
     .res 2
 dptr2:
     .res 2
+dptr3:
+    .res 2
 .segment "BSS"
 mfiles:
     .res 2
 menddir:
+    .res 2
+msortinto:
+    .res 2
+mendsort:
     .res 2
 ctop:
     .res 2
@@ -99,193 +107,138 @@ stat_cmd:
 fn_buf:
     .res 256
 
-.proc sortdir_section: near
-    ; bubble sort for now because it's simple to implement
+.proc sortdir: near
+    
+    lda msortinto
+    sta dptr2
+    lda msortinto+1
+    sta dptr2+1
 
-    ; reset pointer
-    stx begin
-    sty begin+1
-
-    stx dptr
-    sty dptr+1
-
-:   lda (dptr) ; check for end of listing (empty section)
-    jeq end
-
-restart:
-    stx dptr
-    sty dptr+1
-    stx dptr2
-    sty dptr2+1
-    stz swapped
-
-
-    ; walk dptr2 forward by one element
-walk1:
-    inc dptr2
-    bne :+
-    inc dptr2+1
-:   lda (dptr2)
-    bne walk1
-    ; we're now at the null before the next element
-    ; increment once more
-    inc dptr2
-    bne :+
-    inc dptr2+1
-:   lda (dptr2) ; check for end of listing
-    jeq check_swapped
-    ; check if we're on the file/directory boundary
-    lda dptr2+1
-    cmp mfiles+1
-    bne sort_pair
-    lda dptr2
-    cmp mfiles
-    jeq check_swapped
-sort_pair:
-    ldy #0
-checkloop:
-    lda (dptr),y
-    cmp (dptr2),y
-    bcc walk2 ; pair is in the correct order
-    bne swapit ; pair is in the wrong order
-    ; equality
-    cmp #0 ; double-check we didn't reach the end
-    beq walk2 ; this would mean two identical entries, don't swap
-    iny
-    bra checkloop
-walk2:
-    lda dptr2
-    sta dptr
-    lda dptr2+1
+nextpass:
+    stz found_flag
+    stz dptr
+    lda #$a0
     sta dptr+1
-    bra walk1
-swapit:
-    stz tmp3 ; value in tmp3 indicates cplaying needs to swap forward
-    ; first check to see if cplaying needs swap
-    lda cplaying+1
-    cmp dptr2+1
-    bne cp1
-    lda cplaying
-    cmp dptr2
-    bne cp1
-    ; cplaying is on the second element, swap it to the first's location
-    lda dptr
-    sta cplaying
-    lda dptr+1
-    sta cplaying+1
-    bra ca2
-cp1:
-    lda cplaying+1
-    cmp dptr+1
-    bne ca2
-    lda cplaying
-    cmp dptr
-    bne ca2
-    inc tmp3
-ca2:
-    stz tmp3+1 ; value in tmp3+1 indicates cactive needs to swap forward
-    ; next check to see if cactive need swap
-    lda cactive+1
-    cmp dptr2+1
-    bne ca1
-    lda cactive
-    cmp dptr2
-    bne ca1
-    lda dptr
-    sta cactive
-    lda dptr+1
-    sta cactive+1
-    bra copyout
-ca1:
-    lda cactive+1
-    cmp dptr+1
-    bne copyout
-    lda cactive
-    cmp dptr
-    bne copyout
-    inc tmp3+1
-copyout:
-    ; copy the first name out
-    ldy #0
-cpylp:
+
+    lda #SORT_BANK
+    sta X16::Reg::RAMBank
+
+    lda (dptr)
+    jeq end ; empty sort dir
+    
+    bra nextfile
+advance:
     lda (dptr),y
-    sta preserved_name,y
-    beq copy2to1
+    beq @1
     iny
-    bne cpylp
-copy2to1:
-    ; copy ptr2's data to ptr1's location
-    ldy #0
-cpy21lp:
-    lda (dptr2),y
-    sta (dptr),y
-    beq resetptr2
-    iny
-    bne cpy21lp
-resetptr2:
-    ; set ptr2 to the next spot, which should allow the preserved
-    ; name to fit
+    bne advance
+    dey
+@1:
     iny
     tya
+    beq @2
     clc
     adc dptr
-    sta dptr2
-    lda dptr+1
-    adc #0
-    sta dptr2+1
+    sta dptr
+    bcc @3
+@2:
+    inc dptr+1
+@3:   
+
+nextfile:
     ldy #0
-    lda #1
-    sta swapped 
-cpypto2:
-    ; finish the swap
-    lda preserved_name,y
-    sta (dptr2),y
-    beq chkcp
+    lda (dptr)
+    jeq endoflist ; end of dir
+    cmp #','
+    beq advance ; already parsed
+    lda found_flag
+    beq foundlow ; always populate buf if nothing is there yet
+compareloop:
+    lda (dptr),y
+    cmp fn_buf,y
+    beq @1
+    bcc foundlow
+    bcs advance
+@1:
+    cmp #0
+    beq foundlow ; doubled file in list? should never happen
     iny
-    bne cpypto2
-    ; finish the cursor swaps if needed
-chkcp:
-    lda tmp3
-    beq chkca
-    lda dptr2
-    sta cplaying
-    lda dptr2+1
-    sta cplaying+2
-chkca:
-    lda tmp3+1
-    jeq walk2
-    lda dptr2
-    sta cactive
-    lda dptr2+1
-    sta cactive
-    jmp walk2
-check_swapped:
-    lda swapped
+    bne compareloop
+foundlow:
+    ; first, check for '.' directory
+dotcheck:
+    ldy #0
+    lda (dptr)
+    cmp #'.'
+    bne nodot
+    iny
+    lda (dptr),y
+    bne nodot
+    lda #','
+    sta (dptr)
+    bra advance
+nodot:
+    lda #1
+    sta found_flag
+    ldy #0
+sort2buflp:
+    lda (dptr),y
+    sta fn_buf,y
+    beq aftercopy
+    iny
+    bne sort2buflp
+    dey
+aftercopy:
+    ; save position so we can commaify the entry later
+    lda dptr
+    sta dptr3
+    lda dptr+1
+    sta dptr3+1
+    
+    bra advance
+endoflist:
+    lda found_flag
     beq end
-    ldx begin
-    ldy begin+1
-    jmp restart
+
+    lda #DIR_BANK
+    sta X16::Reg::RAMBank
+    ldy #0
+buf2dirlp:
+    lda fn_buf,y
+    sta (dptr2),y
+    beq @1
+    iny
+    bne buf2dirlp
+    dey
+@1:
+    iny
+    tya
+    beq @2
+    clc
+    adc dptr2
+    sta dptr2
+    bcc @3
+@2:
+    inc dptr2+1
+@3:
+    lda #SORT_BANK
+    sta X16::Reg::RAMBank
+
+    ; comma-ify the entry we just saved
+    lda #','
+    sta (dptr3)
+
+    ; check to make sure we're not near the end of the bank
+    lda dptr2+1
+    cmp #$bf
+    jcc nextpass
 end:
     clc
     rts
-begin:
-    .word 0
-swapped:
+found_flag:
     .byte 0
 .endproc
 
-.proc sortdir
-    lda #DIR_BANK
-    sta X16::Reg::RAMBank
-    ldx #$00
-    ldy #$a0
-    jsr sortdir_section
-    ldx mfiles
-    ldy mfiles+1
-    jsr sortdir_section
-    inc dir_needs_refresh
-    rts
-.endproc
 
 .scope loader
 reset:
@@ -690,7 +643,7 @@ maybe_zsm:
     jsr draw_file_box
     jsr show_directory
     jsr legend_jukebox
-
+    jsr clear_zsm_tuning
 
     ; draw pianos
     ldx #12
@@ -859,6 +812,7 @@ zsm_continue:
     stz stopping
     stz atten
     stz zsm_tuning
+	stz zsm_tuning_update
 
 	ldx #0
 	lda #0
@@ -1288,11 +1242,15 @@ row:
 
 .proc load_directory
     stz dptr
+    stz msortinto
     lda #$a0
     sta dptr+1
+    sta msortinto+1
 
-    lda #DIR_BANK
+    lda #SORT_BANK
     sta X16::Reg::RAMBank
+
+    ; load directory
 
     lda #6
     ldx #<dirfn
@@ -1302,10 +1260,26 @@ row:
 
     jsr loaddir
 
-    lda dptr
+    lda #0
+    sta (dptr)
+
+    ; sort directory
+    jsr sortdir
+
+    ; set the write point
+    lda dptr2
+    sta msortinto
     sta mfiles
-    lda dptr+1
+    lda dptr2+1
+    sta msortinto+1
     sta mfiles+1
+
+    stz dptr
+    lda #$a0
+    sta dptr+1
+
+    lda #SORT_BANK
+    sta X16::Reg::RAMBank
 
     lda #6
     ldx #<filefn
@@ -1317,9 +1291,19 @@ row:
 
     lda #0
     sta (dptr)
-    lda dptr
+
+    ; sort directory
+    jsr sortdir
+
+    lda #DIR_BANK
+    sta X16::Reg::RAMBank
+
+    ; null terminate it
+    lda #0
+    sta (dptr2)
+    lda dptr2
     sta menddir
-    lda dptr+1
+    lda dptr2+1
     sta menddir+1
 
     ; look for preserved name
@@ -1451,7 +1435,7 @@ name_loop:
     bne plaerr
     pla
     cmp #$22
-    beq dotcheck
+    beq bank_full_check
 
     sta (dptr)
     inc dptr
@@ -1459,58 +1443,16 @@ name_loop:
     inc dptr+1
     bra name_loop
 
-dotcheck:
+bank_full_check:
     lda #0
     sta (dptr)
-    ; skip filename if it's "."
-    ; first, back up by 2
-    lda dptr
-    sec
-    sbc #2
-    sta dptr
-    bcs :+
-    dec dptr+1
-    ; now check to see if we underflowed the pointer out of 
-    ; banked ram
-:   lda dptr+1
-    cmp #$a0
-    bcs :+
-    ; we underflowed
-    ; check to see if $a000 is a dot
-    lda $a000
-    cmp #'.'
-    ; apparently a single character filename at the top of the directory
-    ; that is not a dot
-    bne wasok
-    ; is a dot, reset
-    stz dptr
-    lda #$a0
-    sta dptr+1
-    bra nul_loop
-:   ; if directory just read is ".", then the sequence will be "\0.\0"
-    lda (dptr)
-    bne wasok
-    ldy #1
-    lda (dptr),y
-    cmp #'.'
-    bne wasok
-    ; next byte is definitely null since we're here
-    ; we just placed "." as a directory name
     inc dptr
     bne :+
-:   inc dptr+1
-    bra nul_loop
-wasok:    
-    lda dptr
-    clc
-    adc #3
-    sta dptr
-    bcc :+
     inc dptr+1
 :   lda dptr+1
     cmp #$bf
     beq maybe_stop_here
-    jmp nul_loop
+    bra nul_loop
 maybe_stop_here:
     ; we're getting very close to the end of the bank
     ; let's just not load any more
@@ -1745,6 +1687,8 @@ blk:
 :   cpy #3
     bne end
     sta zsm_tuning
+    lda #$80
+    sta zsm_tuning_update
 end:
     rts
 .endproc

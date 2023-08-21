@@ -60,7 +60,7 @@ playback_mode:
 .import stopping
 .import atten
 .import draw_lyric
-.import sortdir
+.import draw_zsm_tuning
 
 .include "macros.inc"
 
@@ -176,12 +176,6 @@ rekey:
 	bra rekey
 :
 
-	cmp #$73 ; S
-	bne :+
-	jsr sortdir
-	bra rekey
-:
-
 	cmp #$20 ; space
 	bne :+
 	lda playback_mode
@@ -232,6 +226,7 @@ stopmidi:
 iszsm:
 	jsr check_lazy_load
 	jsr draw_zsm_ptr
+	jsr draw_zsm_tuning
 	jsr do_zsm_sprites
 
 	lda stopping

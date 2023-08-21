@@ -30,7 +30,10 @@
 .export draw_zsm_ptr
 .export draw_zsm_loop_ptr
 .export draw_lyric
+.export draw_zsm_tuning
+.export clear_zsm_tuning
 .export zsm_tuning
+.export zsm_tuning_update
 
 .segment "BSS"
 
@@ -55,6 +58,8 @@ midinote:
 midifrac:
 	.res 1
 zsm_tuning:
+	.res 1
+zsm_tuning_update:
 	.res 1
 
 .segment "ZEROPAGE"
@@ -344,7 +349,6 @@ blank:
 	jmp X16::Kernal::BSOUT
 .endproc
 
-; Input: .X = y coord, .Y = x coord
 .proc draw_zsm_ptr
 	ldx #34
 	ldy #66
@@ -373,6 +377,80 @@ blank:
 	jmp print_hex
 .endproc
 
+.proc clear_zsm_tuning
+	ldx #52
+	ldy #67
+	clc
+	jsr X16::Kernal::PLOT
+
+	ldx #0
+lloop:
+    lda legend,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop
+:	rts
+legend:
+	.byte "      ",$11,$9d,$9d,$9d,$9d,$9d,$9d,$9d
+	.byte "        ",0
+.endproc
+
+.proc draw_zsm_tuning
+	lda zsm_tuning_update
+	beq end
+	stz zsm_tuning_update
+	ldx #52
+	ldy #67
+	clc
+	jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop:
+    lda legend,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop
+:	lda zsm_tuning
+	bpl plus
+	lda #'-'
+	bra sign
+plus:
+	lda #'+'
+sign:
+	jsr X16::Kernal::CHROUT
+
+	lda zsm_tuning
+	bpl pos
+	eor $ff
+	inc
+pos:
+	lsr
+	lsr
+	tax
+	lda tuning,x
+	jsr print_hex
+
+    ldx #0
+cloop:
+    lda cents,x
+    beq end
+    jsr X16::Kernal::CHROUT
+    inx
+    bne cloop
+end:
+	rts
+legend:
+	.byte $90,$01,$9e,"TUNING",$11,$9d,$9d,$9d,$9d,$9d,$9d,$9d,$05,0
+cents:
+	.byte " CENT",0
+tuning:
+	.byte $00,$02,$03,$05,$06,$08,$09,$11
+	.byte $13,$14,$16,$17,$19,$20,$22,$23
+	.byte $25,$27,$28,$30,$31,$33,$34,$36
+	.byte $38,$39,$41,$42,$44,$45,$47,$48,$50
+.endproc
 
 
 ; x/y dimensions of box (16 pixel tiles)

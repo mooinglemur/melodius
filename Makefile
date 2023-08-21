@@ -43,7 +43,7 @@ clean:
 	$(RM) $(EXE) $(OBJS) $(SDCARD) $(MAPFILE) $(SYMFILE)
 
 box: $(EXE) $(SDCARD)
-	box16 -sdcard $(SDCARD) -prg $(EXE) -run
+	box16 -sdcard $(SDCARD) -prg $(EXE) -run -ram 1024
 
 run: $(EXE) $(SDCARD)
 	x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -scale 2 -run -ram 1024
