@@ -41,6 +41,10 @@
 .import zsm_tuning_update
 .import clear_zsm_tuning
 
+.import clear_via_timer
+.import setup_via_timer
+.import use_via_timer
+
 .include "x16.inc"
 
 .scope AudioAPI
@@ -154,8 +158,13 @@ nextfile:
     lda found_flag
     beq foundlow ; always populate buf if nothing is there yet
 compareloop:
+    lda fn_buf,y
+    jsr case_fold
+    sta CF
     lda (dptr),y
-    cmp fn_buf,y
+    jsr case_fold
+    cmp #$ff    
+CF = * - 1
     beq @1
     bcc foundlow
     bcs advance
@@ -239,6 +248,36 @@ found_flag:
     .byte 0
 .endproc
 
+.proc case_fold: near
+    cmp #$61
+    bcc end
+    cmp #$7b
+    bcc sub20
+    cmp #$a8
+    bcc end
+    beq sub2
+    cmp #$b8
+    bcc end
+    beq sub4
+    cmp #$e0
+    bcc end
+    cmp #$ff
+    bcc sub20
+    lda #$be
+    rts
+sub20:
+    sec
+    sbc #$20
+end:
+    rts
+sub4:
+    dec
+    dec
+sub2:
+    dec
+    dec
+    rts
+.endproc
 
 .scope loader
 reset:
@@ -788,6 +827,9 @@ zsm_load_remainder:
     ; ZSM has PCM data.  We will simply load it in full
     ; now before returning control
 
+    jsr clear_via_timer
+    stz use_via_timer
+
     jsr loader::load_remainder
     bcc zsm_continue
     rts
@@ -818,6 +860,42 @@ zsm_continue:
 	lda #0
 	jsr zsmkit::zsm_setatten
 
+    ldx #0
+    jsr zsmkit::zsm_getrate
+    cpy #0
+    bne @do60
+    cmp #60
+    beq @do60
+    cmp #30
+    beq @do60
+    cmp #20
+    beq @do60
+    cmp #15
+    beq @do60
+    cmp #12
+    beq @do60
+    cmp #10
+    beq @do60
+    cmp #7
+    bcc @do60
+
+    pha
+    jsr zsmkit::zsm_set_int_rate
+    pla
+    jsr setup_via_timer
+    lda #1
+    sta use_via_timer
+    
+
+    bra @zplay
+
+@do60:
+    lda #60
+    jsr zsmkit::zsm_set_int_rate
+    stz use_via_timer
+    jsr clear_via_timer
+
+@zplay:
     ldx #0
     jsr zsmkit::zsm_play
 

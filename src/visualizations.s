@@ -1339,7 +1339,15 @@ high:
 	rol
 	and #$03
 	tay
-	lda wav2color,y
+	bne :+ ; colorful based on duty
+	lda #62
+	cmp zsmkit::vera_psg_shadow+3,x
+	lda #0
+	rol
+	asl
+	asl
+	tay
+:	lda wav2color,y
 	asl
 	asl
 
@@ -1463,7 +1471,7 @@ end:
 	rts
 
 wav2color:
-	.byte 1,4,12,8
+	.byte 1,4,12,8,6
 .endproc
 
 

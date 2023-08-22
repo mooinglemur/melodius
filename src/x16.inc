@@ -317,6 +317,27 @@ x16_inc = 1
 
 .endscope
 
+.scope VIA1
+    .scope Reg
+        PB       = $9F00
+        PA       = $9F01
+        DDRB     = $9F02
+        DDRA     = $9F03
+        T1CL     = $9F04
+        T1CH     = $9F05
+        T1LL     = $9F06
+        T1LH     = $9F07
+        T2CL     = $9F08
+        T2CH     = $9F09
+        SR       = $9F0A
+        ACR      = $9F0B
+        PCR      = $9F0C
+        IFR      = $9F0D
+        IER      = $9F0E
+        PA2      = $9F0F
+    .endscope
+.endscope
+
 .scope YM2151
     .scope Reg
         TEST          = $01 ; [1] LFO RESET

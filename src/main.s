@@ -62,6 +62,8 @@ playback_mode:
 .import draw_lyric
 .import draw_zsm_tuning
 
+.import clear_via_timer
+
 .include "macros.inc"
 
 .scope zsmkit
@@ -266,6 +268,7 @@ stopzsm:
 	ldx #0
 	jsr zsmkit::zsm_close
 	jsr hide_sprites
+	jsr clear_via_timer
 songstopped:
 	ldx #34
 	ldy #20
