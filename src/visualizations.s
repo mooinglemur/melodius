@@ -1339,18 +1339,21 @@ high:
 	rol
 	and #$03
 	tay
-	bne :+ ; colorful based on duty
-	lda #62
-	cmp zsmkit::vera_psg_shadow+3,x
-	lda #0
-	rol
+	bne notsq ; colorful based on duty
+	lda #$53
+	sta PAL
+	lda zsmkit::vera_psg_shadow+3,x
+	and #$3c
+	bne aftersq
+	lda #$04
+	bra aftersq
+notsq:
+	lda #$51
+	sta PAL
+	lda wav2color,y
 	asl
 	asl
-	tay
-:	lda wav2color,y
-	asl
-	asl
-
+aftersq:
 	sta tmp1
 	stz tmp2
 
@@ -1447,6 +1450,7 @@ endbend:
 
 	; set 16x16
 	lda #$51 ; and pal offset 1
+PAL = * - 1 ; modified above
 	sta Vera::Reg::Data0
 	bra splend
 	
@@ -1471,7 +1475,7 @@ end:
 	rts
 
 wav2color:
-	.byte 1,4,12,8,6
+	.byte 1,6,12,8
 .endproc
 
 
@@ -1899,7 +1903,7 @@ m3loop:
 	lda pal,x
 	sta Vera::Reg::Data0
 	inx
-	cpx #64
+	cpx #96
 	bcc :-
 
 	rts
@@ -1914,7 +1918,10 @@ pal:
 	.word $0000,$0FF0,$0222,$0333,$0554,$0555,$0555,$0334
 	;      none  text
 	.word $0555,$0FFF,$0AAA,$0BBB,$0CCC,$0DDD,$0EEE,$0FFF
-
+	; Pulse waves
+	.word $0000,$0F11,$0F22,$0F33,$0F44,$0F55,$0F66,$0F77
+	.word $0F88,$0F99,$0FAA,$0FBB,$0FCC,$0FDD,$0FEE,$0FFF
+	
 .endproc
 
 .proc clear_screen

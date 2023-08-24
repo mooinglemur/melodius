@@ -879,6 +879,7 @@ zsm_continue:
     cmp #7
     bcc @do60
 
+@dovia:
     pha
     jsr zsmkit::zsm_set_int_rate
     pla
@@ -886,7 +887,6 @@ zsm_continue:
     lda #1
     sta use_via_timer
     
-
     bra @zplay
 
 @do60:

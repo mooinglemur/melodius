@@ -1,4 +1,4 @@
-
+.macpack longbranch
 
 .export midi_parse
 .export midi_play
@@ -1139,6 +1139,14 @@ end:
 
 
     sty midizp ; stash Y until the end, we're done reading until the end of this routine
+
+    ; ignore notes out of range of the YM2151
+    lda note_iter
+    cmp #109
+    jcs end
+    cmp #13
+    jcc end
+
 
     ; find a channel for this note
     jsr find_ymchannel ; returns the one to use in X
