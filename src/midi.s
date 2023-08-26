@@ -7,7 +7,7 @@
 .export midi_is_playing
 .export midi_stop
 
-.export ymnote, yminst, ymmidi, midibend, ympan, midiinst
+.export ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .export lyrics
 
 .import divide40_24
@@ -90,6 +90,7 @@
     track       .byte YM2151_CHANNELS ; which track did this note come from?
     pan         .byte YM2151_CHANNELS
     velocity    .byte YM2151_CHANNELS
+    atten       .byte YM2151_CHANNELS
 .endstruct
 
 
@@ -135,6 +136,7 @@ ymnote := ymchannels + YMChannel::note
 yminst := ymchannels + YMChannel::instrument 
 ymmidi := ymchannels + YMChannel::midichannel
 ympan := ymchannels + YMChannel::pan
+ymatten := ymchannels + YMChannel::atten
 midibend := midichannels + MIDIChannel::pitchbend
 midiinst := midichannels + MIDIChannel::instrument
 
@@ -1172,6 +1174,8 @@ end:
     clc
     adc tmp1
 
+    ldx ymchannel_iter
+    sta ymchannels + YMChannel::atten,x
     tax
     API_BORDER
     lda ymchannel_iter

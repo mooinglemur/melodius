@@ -15,7 +15,7 @@
 .import loader_get_ptr
 .import playback_mode
 
-.import ymnote, yminst, ymmidi, midibend, ympan, midiinst
+.import ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .import lyrics
 .export update_instruments
 .export do_midi_sprites
@@ -487,7 +487,7 @@ tuning:
 cloop:
 	lda #$12
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 	dey
 	bne cloop
@@ -513,7 +513,7 @@ tploop:
 tploop2:
 	lda #$21
 	sta Vera::Reg::Data0
-	lda #$28
+	lda #$18
 	sta Vera::Reg::Data0
 	dey
 	bne tploop2
@@ -521,7 +521,7 @@ tploop2:
 	; upper right corner
 	lda #$23
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 
 mainloop:
@@ -530,14 +530,14 @@ mainloop:
 	; left side
 	lda #$18
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 
 	ldy cols
 midloop:
 	lda #$2f
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 	dey
 	bne midloop
@@ -545,7 +545,7 @@ midloop:
 	; right side
 	lda #$24
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 
 	dec rows
@@ -557,21 +557,21 @@ midloop:
 	; bottom edge
 	lda #$25
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 
 	ldy cols
 botloop:
 	lda #$21
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 	dey
 	bne botloop
 
 	lda #$22
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 
 	rts
@@ -589,7 +589,7 @@ eat_it:
 	rts
 
 top_preamble:
-	.byte $23,$24,$1c,$20,$1d,$20
+	.byte $23,$14,$1c,$10,$1d,$10
 rows:
 	.byte 0
 cols:
@@ -967,8 +967,18 @@ endbend:
 	ora panright
 	sta Vera::Reg::Data0
 
+	; get channel volume (attenuation)
+	lda ymatten,x
+	cmp #$3f
+	bcc :+
+	lda #$3f
+:	and #$30
+	lsr
+	lsr
+	lsr
+
 	; set 16x16
-	lda #$51 ; and pal offset 1
+	adc #$52 ; and pal offset 2
 	sta Vera::Reg::Data0
 	bra splend
 	
@@ -1175,7 +1185,7 @@ endbend:
 	sta Vera::Reg::Data0
 
 	; set 16x16
-	lda #$51 ; and pal offset 1
+	lda #$52 ; and pal offset 2
 	sta Vera::Reg::Data0
 	bra splend
 	
@@ -1245,8 +1255,13 @@ wav2color:
 	lda #$0C
 	sta Vera::Reg::Data0
 
+	lda Vera::Reg::AudioCtrl
+	eor #$ff
+	and #$0c
+	lsr
 	; set 16x16
-	lda #$51 ; and pal offset 1
+	adc #$52 ; and pal offset 2
+	
 	sta Vera::Reg::Data0
 
 	rts
@@ -1348,7 +1363,7 @@ high:
 	lda #$04
 	bra aftersq
 notsq:
-	lda #$51
+	lda #$52
 	sta PAL
 	lda wav2color,y
 	asl
@@ -1356,6 +1371,17 @@ notsq:
 aftersq:
 	sta tmp1
 	stz tmp2
+
+chkvol:
+	lda zsmkit::vera_psg_shadow+2,x
+	eor #$ff
+	and #$30
+	lsr
+	lsr
+	lsr
+	adc PAL
+	sta PAL
+
 
 chkpan:
 	lda zsmkit::vera_psg_shadow+2,x
@@ -1449,7 +1475,7 @@ endbend:
 	sta Vera::Reg::Data0
 
 	; set 16x16
-	lda #$51 ; and pal offset 1
+	lda #$52 ; and pal offset 2
 PAL = * - 1 ; modified above
 	sta Vera::Reg::Data0
 	bra splend
@@ -1830,7 +1856,7 @@ TS = * - 2
 	bne tsloop
 
 	; clear $8000 of 64x32 tiles
-	; blank tile is $12 with attribute byte $20
+	; blank tile is $12 with attribute byte $10
 
 	VERA_SET_ADDR $8000, 1
 
@@ -1839,7 +1865,7 @@ TS = * - 2
 tbloop:
 	lda #$12
 	sta Vera::Reg::Data0
-	lda #$20
+	lda #$10
 	sta Vera::Reg::Data0
 	iny
 	bne tbloop
@@ -1903,25 +1929,67 @@ m3loop:
 	lda pal,x
 	sta Vera::Reg::Data0
 	inx
-	cpx #96
+	cpx #32
 	bcc :-
+
+	ldx #0
+:
+	lda pal2,x
+	sta Vera::Reg::Data0
+	inx
+	bne :-
+
 
 	rts
 pal:
-	; Sprites
-	;      bg    pno   chpr  orgn  guit  bass  str   ens
-	.word $0000,$0FFF,$08A3,$0DDF,$0F8A,$000F,$00F0,$00FF
-	;      bras  reed  pipe  lead  pad   fx    eth   perc
-	.word $0FF0,$0DFD,$0FDD,$0ABC,$06AF,$0FA6,$0AF6,$0A6F
 	; Tileset
 	;      bg    none  pno1  pno2  pnoC  none  none  skin
 	.word $0000,$0FF0,$0222,$0333,$0554,$0555,$0555,$0334
 	;      none  text
 	.word $0555,$0FFF,$0AAA,$0BBB,$0CCC,$0DDD,$0EEE,$0FFF
+pal2:
+	; max volume 3/3
+	; Sprites
+	;      bg    pno   chpr  orgn  guit  bass  str   ens
+	.word $0000,$0FFF,$08A3,$0DDF,$0F8A,$000F,$00F0,$00FF
+	;      bras  reed  pipe  lead  pad   fx    eth   perc
+	.word $0FF0,$0DFD,$0FDD,$0ABC,$06AF,$0FA6,$0AF6,$0A6F
 	; Pulse waves
 	.word $0000,$0F11,$0F22,$0F33,$0F44,$0F55,$0F66,$0F77
 	.word $0F88,$0F99,$0FAA,$0FBB,$0FCC,$0FDD,$0FEE,$0FFF
-	
+
+	; volume 2/3
+	; Sprites
+	;      bg    pno   chpr  orgn  guit  bass  str   ens
+	.word $0000,$0BBB,$0682,$0AAB,$0B68,$000B,$00B0,$00BB
+	;      bras  reed  pipe  lead  pad   fx    eth   perc
+	.word $0BB0,$0ABA,$0BAA,$0889,$058B,$0B85,$08B5,$085B
+	; Pulse waves
+	.word $0000,$0B11,$0B11,$0B22,$0B33,$0B44,$0B55,$0B55
+	.word $0B66,$0B77,$0B88,$0B88,$0B99,$0BAA,$0BBB,$0BBB
+
+	; volume 1/3
+	; Sprites
+	;      bg    pno   chpr  orgn  guit  bass  str   ens
+	.word $0000,$0888,$0452,$0778,$0845,$0008,$0080,$0088
+	;      bras  reed  pipe  lead  pad   fx    eth   perc
+	.word $0880,$0787,$0877,$0566,$0358,$0853,$0583,$0538
+	; Pulse waves
+	.word $0000,$0811,$0811,$0822,$0822,$0833,$0833,$0844
+	.word $0844,$0855,$0855,$0866,$0866,$0877,$0877,$0888
+
+	; volume 0/3
+	; Sprites
+	;      bg    pno   chpr  orgn  guit  bass  str   ens
+	.word $0000,$0444,$0231,$0334,$0423,$0004,$0040,$0044
+	;      bras  reed  pipe  lead  pad   fx    eth   perc
+	.word $0440,$0343,$0433,$0333,$0234,$0432,$0342,$0324
+	; Pulse waves
+	.word $0000,$0600,$0611,$0611,$0611,$0622,$0622,$0633
+	.word $0633,$0633,$0644,$0644,$0655,$0655,$0655,$0666
+
+
+
 .endproc
 
 .proc clear_screen
