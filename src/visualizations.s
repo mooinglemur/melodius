@@ -1184,12 +1184,52 @@ endbend:
 	ora panright
 	sta Vera::Reg::Data0
 
+	; get the alg
+	lda zsmkit::opm_shadow+$20,x
+	and #$07
+	tay
+	lda alg2mask,y
+	sta tmp1
+	; set max atten we'll process
+	lda #$3f
+	sta tmp2
+m1:
+	lsr tmp1
+	bcc m2
+	lda zsmkit::opm_shadow+$60,x
+	cmp tmp2
+	bcs m2
+	sta tmp2
+m2:
+	lsr tmp1
+	bcc c1
+	lda zsmkit::opm_shadow+$68,x
+	cmp tmp2
+	bcs c1
+	sta tmp2
+c1:
+	lsr tmp1
+	bcc c2
+	lda zsmkit::opm_shadow+$70,x
+	cmp tmp2
+	bcs c2
+	sta tmp2
+c2: ; C2 is always a carrier
+	lda zsmkit::opm_shadow+$78,x
+	cmp tmp2
+	bcs vol
+	sta tmp2
+vol:
+	lda tmp2
+	and #$30
+	lsr
+	lsr
+	lsr
 	; set 16x16
-	lda #$52 ; and pal offset 2
+	adc #$52 ; and pal offset 2
 	sta Vera::Reg::Data0
 	bra splend
 	
-
 hideit:
 	stz Vera::Reg::Data0
 	stz Vera::Reg::Data0
@@ -1208,7 +1248,8 @@ splend:
 
 end:
 	rts
-
+alg2mask:
+	.byte $08,$08,$08,$08,$0c,$0e,$0e,$0f
 wav2color:
 	.byte 12,2,15,4,6,1,8,7
 .endproc
@@ -1404,11 +1445,16 @@ chkpan:
 	adc #0
 	sta tmp2
 chkpitch:
+	lda midinote
+	cmp #35 ; bottom of the PSG range, don't bother showing
+	        ; the bend because even the best tuning shows
+			; as bent for some notes here
+	bcc endbend
 	lda midifrac
 	beq endbend
 	bpl contbend
 
-	cmp #$C0
+	cmp #$c0
 	bcs endbend
 
 	ldy #2
@@ -1981,9 +2027,9 @@ pal2:
 	; volume 0/3
 	; Sprites
 	;      bg    pno   chpr  orgn  guit  bass  str   ens
-	.word $0000,$0444,$0231,$0334,$0423,$0004,$0040,$0044
+	.word $0000,$0666,$0231,$0334,$0423,$0006,$0060,$0066
 	;      bras  reed  pipe  lead  pad   fx    eth   perc
-	.word $0440,$0343,$0433,$0333,$0234,$0432,$0342,$0324
+	.word $0660,$0343,$0433,$0333,$0246,$0642,$0462,$0426
 	; Pulse waves
 	.word $0000,$0600,$0611,$0611,$0611,$0622,$0622,$0633
 	.word $0633,$0633,$0644,$0644,$0655,$0655,$0655,$0666

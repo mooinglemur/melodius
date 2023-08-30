@@ -828,7 +828,6 @@ zsm_load_remainder:
     ; now before returning control
 
     jsr clear_via_timer
-    stz use_via_timer
 
     jsr loader::load_remainder
     bcc zsm_continue
@@ -881,16 +880,18 @@ zsm_continue:
 
 @dovia:
     pha
+    ldy #0
     jsr zsmkit::zsm_set_int_rate
     pla
     jsr setup_via_timer
     lda #1
     sta use_via_timer
-    
+
     bra @zplay
 
 @do60:
     lda #60
+    ldy #0
     jsr zsmkit::zsm_set_int_rate
     stz use_via_timer
     jsr clear_via_timer
@@ -959,6 +960,7 @@ waszsm:
     stz playback_mode
     ldx #0
     jsr zsmkit::zsm_close
+    jsr clear_via_timer
     jmp loadnewfile
 dotdot:
     .byte "..",0
