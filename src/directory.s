@@ -17,6 +17,7 @@
 .export sortdir
 
 .export files_full_size
+.export files_width
 .export loopctr
 .export jukebox
 .export stopping
@@ -40,10 +41,12 @@
 .import zsm_tuning
 .import zsm_tuning_update
 .import clear_zsm_tuning
+.import loading_msg
 
 .import clear_via_timer
 .import setup_via_timer
 .import use_via_timer
+
 
 .include "x16.inc"
 
@@ -365,6 +368,12 @@ loader_get_ptr:
     ldy PTR+1
     rts
 
+loader_set_ptr:
+    sta BK
+    stx PTR
+    sty PTR+1
+    rts
+
 .endscope
 
 loader_get_ptr := loader::loader_get_ptr
@@ -684,6 +693,9 @@ maybe_zsm:
     jsr legend_jukebox
     jsr clear_zsm_tuning
 
+    lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
+
     ; draw pianos
     ldx #12
     ldy #13
@@ -709,7 +721,7 @@ piano_loop2:
     ; draw window for PCM
     VERA_SET_ADDR $87ba, 8
     lda #$20
-    ldx #9
+    ldx #8
 :   sta Vera::Reg::Data0
     dex
     bne :-
@@ -801,8 +813,9 @@ eat_pcmoff:
     lda tmp3
     ora tmp3+1
     ora tmp3+2
-    bne zsm_load_remainder
+    bne zsm_preload_pcm
 
+preload:
     lda #$80
     sta is_lazy_loading
 
@@ -818,20 +831,104 @@ preload_loop:
     sec
     rts
 :   cmp #0
-    bne close_zsm_continue ; very short ZSM fully loaded
+    jne close_zsm_continue ; very short ZSM fully loaded
     dex
     bne preload_loop
-    bra zsm_continue
+    jmp zsm_continue
 
-zsm_load_remainder:
-    ; ZSM has PCM data.  We will simply load it in full
-    ; now before returning control
+zsm_preload_pcm:
+    ; ZSM has PCM data.  We will load the PCM
+    ; data and then return to lazy load
 
     jsr clear_via_timer
 
+    lda #2 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
+
+    ; seek to PCM data in file
+    lda tmp3+2
+    sta seekfn+2
+    lda tmp3+1
+    sta seekfn+3
+    lda tmp3+0
+    sta seekfn+4
+    stz seekfn+5
+
+    lda #6
+    ldx #<seekfn
+    ldy #>seekfn
+    jsr X16::Kernal::SETNAM
+
+    lda #15
+    ldx #8
+    ldy #15
+    jsr X16::Kernal::SETLFS
+    
+    jsr X16::Kernal::OPEN
+
+    ldx #15
+    jsr X16::Kernal::CHKIN
+eat_seek_response:
+    jsr X16::Kernal::CHRIN
+    jsr X16::Kernal::READST
+    and #$40
+    bne eat_seek_response
+
+    jsr X16::Kernal::CLRCHN
+    lda #15
+    jsr X16::Kernal::CLOSE
+
+    ; high byte of pcm offset is bank times 32
+    lda tmp3
+    asl
+    asl
+    asl
+    clc
+    adc #LOAD_BANK
+    sta tmp3
+
+    ; medium byte adds to the bank if we're over $20
+    lda tmp3+1
+:   cmp #$20
+    bcc :+
+    sbc #$20
+    inc tmp3
+    bra :-
+:   adc #$a0
+    tay        ; medium byte
+    ldx tmp3+2 ; low byte
+    lda tmp3   ; bank
+    
+    jsr loader::loader_set_ptr ; for PCM
+
     jsr loader::load_remainder
-    bcc zsm_continue
+    bcc zsm_relazy
     rts
+zsm_relazy: ; reopen the file and lazy load it now that PCM is loaded
+    lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
+
+    ldx #<fn_buf
+    ldy #>fn_buf
+    lda tmp_len
+
+    jsr X16::Kernal::SETNAM
+
+    lda #2
+    ldx #8
+    ldy #2
+    
+    jsr X16::Kernal::SETLFS
+
+    jsr X16::Kernal::OPEN
+
+    lda #LOAD_BANK
+    sta X16::Reg::RAMBank
+    jsr loader::reset
+    jmp preload
+
+seekfn:
+    .byte "P",$02,0,0,0,0
 
 close_zsm_continue:
     lda #2
@@ -927,6 +1024,9 @@ piano_loop3:
     inc
     cmp #16
     bcc piano_loop3
+
+    lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
 
     lda #$11
     sta playback_mode
@@ -1338,10 +1438,17 @@ row:
 
     jsr X16::Kernal::SETNAM
 
+    lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
+
     jsr loaddir
 
     lda #0
     sta (dptr)
+
+    lda #1 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
+
 
     ; sort directory
     jsr sortdir
@@ -1367,10 +1474,16 @@ row:
 
     jsr X16::Kernal::SETNAM
 
+    lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
+
     jsr loaddir
 
     lda #0
     sta (dptr)
+
+    lda #1 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
 
     ; sort directory
     jsr sortdir

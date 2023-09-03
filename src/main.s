@@ -122,8 +122,13 @@ main:
 	jsr show_directory
 	jsr legend_jukebox
 endless:
-	DONE_BORDER
+	jsr X16::Kernal::RDTIM
+	sta FRC
 	wai
+	jsr X16::Kernal::RDTIM
+	cmp #$ff
+FRC = * -1
+	beq endless
 
 rekey:
 	jsr X16::Kernal::GETIN

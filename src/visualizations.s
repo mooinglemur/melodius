@@ -15,6 +15,10 @@
 .import loader_get_ptr
 .import playback_mode
 
+.import files_full_size
+.import files_width
+.import dir_needs_refresh
+
 .import ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .import lyrics
 .export update_instruments
@@ -34,6 +38,7 @@
 .export clear_zsm_tuning
 .export zsm_tuning
 .export zsm_tuning_update
+.export loading_msg
 
 .segment "BSS"
 
@@ -450,6 +455,61 @@ tuning:
 	.byte $13,$14,$16,$17,$19,$20,$22,$23
 	.byte $25,$27,$28,$30,$31,$33,$34,$36
 	.byte $38,$39,$41,$42,$44,$45,$47,$48,$50
+.endproc
+
+.proc loading_msg
+    ; 0 = loading, 1 = sorting, 2 = preloading pcm
+	asl
+	tay
+
+	lda msg_idx,y
+	sta MSG
+	lda msg_idx+1,y
+	sta MSG+1
+
+	lda files_width
+	lsr
+	dec
+	tay ; column number for PLOT
+
+	lda #14
+	tax ; row number for plot
+
+	jsr X16::Kernal::PLOT
+
+	ldx #0
+p1:
+	lda preamble,x
+	beq p2
+	jsr X16::Kernal::BSOUT
+	inx
+	bra p1
+
+p2:
+	ldx #0
+p3:
+	lda $ffff,x
+MSG = * - 2
+	beq p4
+	jsr X16::Kernal::BSOUT
+	inx
+	bra p3
+p4:
+	inc dir_needs_refresh
+
+	rts
+	
+preamble:
+	.byte $1c,$01,$05,0 ; red on white
+msg_idx:
+	.word loadn, sortn, preloadn
+loadn:
+	.byte "    LOADING     ",0
+sortn:
+	.byte "    SORTING     ",0
+preloadn:
+	.byte " PRELOADING PCM ",0
+
 .endproc
 
 
@@ -1285,7 +1345,7 @@ wav2color:
 
 	; bring it downward on the screen
 	clc
-	adc #240
+	adc #233
 	sta Vera::Reg::Data0
 
 	lda #0
