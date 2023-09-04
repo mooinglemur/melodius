@@ -1014,6 +1014,31 @@ load_midi:
     jsr show_directory
     jsr legend_jukebox
 
+    ldx #56
+    ldy #52
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+:   lda midilegend1,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra :-
+:
+
+    ldx #14
+    ldy #47
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+:   lda midilegend2,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra :-
+:
+
+
     ldx #21
     ldy #13
     lda #0
@@ -1905,3 +1930,9 @@ legend4:
     .byte $9e,"LOOP",$11,$11,$11,$9d,$9d,$9d,$9d,$9d
     .byte "CURSOR",$11,$11,$11,$9d,$9d,$9d,$9d,$9d,$9d
     .byte "LOADED",$05,0
+
+midilegend1:
+    .byte $90,$01,$05,"MIDI CHANNEL",0
+
+midilegend2:
+    .byte $9e,"             BEAT   LOADED",0

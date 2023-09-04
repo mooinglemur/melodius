@@ -10,6 +10,8 @@
 .export ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .export lyrics
 
+.export midibeat, midimeasure, midi_timesig_numerator, midi_timesig_denominator
+
 .import divide40_24
 .import multiply16x16
 .import multiply8x8
@@ -66,6 +68,16 @@
     tempochange           .byte ; flag to adjust deltas at the end of the tick
     deltas_processed_frac .byte
     deltas_processed      .dword ; how far along in the song are we?
+    measure               .word  ; BCD, measure number
+    beat                  .byte  ; (not BCD) beat number within measure
+    deltas_per_beat       .word
+    deltas_til_beat_frac  .byte
+    deltas_til_beat       .word
+    timesig_numerator     .byte
+    timesig_denominator   .byte
+    timesig_denominator_shifts .byte
+    timesig_clocks        .byte
+    timesig_32nds_per_quarter  .byte
 .endstruct
 
 .struct MIDIChannel
@@ -139,6 +151,10 @@ ympan := ymchannels + YMChannel::pan
 ymatten := ymchannels + YMChannel::atten
 midibend := midichannels + MIDIChannel::pitchbend
 midiinst := midichannels + MIDIChannel::instrument
+midibeat := midistate + MIDIState::beat
+midimeasure := midistate + MIDIState::measure
+midi_timesig_numerator := midistate + MIDIState::timesig_numerator
+midi_timesig_denominator := midistate + MIDIState::timesig_denominator
 
 .segment "CODE"
 
@@ -561,7 +577,61 @@ trackloop:
     ; This routine clobbers Y but we're done using it
     jsr calc_deltas_per_call
 
+    ; Defaults for these, events can override
+    lda #4
+    sta midistate + MIDIState::timesig_numerator
+    sta midistate + MIDIState::timesig_denominator
+    lda #2
+    sta midistate + MIDIState::timesig_denominator_shifts
+    lda #24
+    sta midistate + MIDIState::timesig_clocks
+    lda #8
+    sta midistate + MIDIState::timesig_32nds_per_quarter
+
+    lda #1
+    sta midistate + MIDIState::measure
+    stz midistate + MIDIState::measure+1
+    sta midistate + MIDIState::beat
+
+    jsr calc_deltas_per_beat
+
     clc
+    rts
+.endproc
+
+.proc calc_deltas_per_beat: near
+    lda midifile + MIDIFile::divisions
+    sta tmp1
+    lda midifile + MIDIFile::divisions+1
+    sta tmp2
+
+    lda midistate + MIDIState::timesig_denominator_shifts
+    sec
+    sbc #2
+    tax
+    bmi @l
+@r:
+    beq @e
+    lsr tmp2
+    ror tmp1
+    dex
+    bne @r
+    bra @e
+@l:
+    beq @e
+    asl tmp1
+    rol tmp2
+    inx
+    bne @l
+@e:
+    stz midistate + MIDIState::deltas_til_beat_frac
+    lda tmp1
+    sta midistate + MIDIState::deltas_per_beat
+    sta midistate + MIDIState::deltas_til_beat
+    lda tmp2
+    sta midistate + MIDIState::deltas_per_beat + 1
+    sta midistate + MIDIState::deltas_til_beat + 1
+
     rts
 .endproc
 
@@ -683,6 +753,53 @@ save_deltas:
 :
     stz tracks_playing
     stz track_iter
+
+    ; calculate beat deltas
+    sec
+    lda midistate + MIDIState::deltas_til_beat_frac
+    sbc midistate + MIDIState::deltas_per_call_frac
+    sta midistate + MIDIState::deltas_til_beat_frac
+
+    lda midistate + MIDIState::deltas_til_beat
+    sbc midistate + MIDIState::deltas_per_call
+    sta midistate + MIDIState::deltas_til_beat
+
+    lda midistate + MIDIState::deltas_til_beat+1
+    sbc midistate + MIDIState::deltas_per_call+1
+    sta midistate + MIDIState::deltas_til_beat+1
+
+    bpl @not_beat
+
+    ; reset the beat countdown
+    clc
+    lda midistate + MIDIState::deltas_per_beat
+    adc midistate + MIDIState::deltas_til_beat
+    sta midistate + MIDIState::deltas_til_beat
+
+    lda midistate + MIDIState::deltas_per_beat+1
+    adc midistate + MIDIState::deltas_til_beat+1
+    sta midistate + MIDIState::deltas_til_beat+1
+
+    ; bump the beat
+    lda midistate + MIDIState::beat
+    inc
+    cmp midistate + MIDIState::timesig_numerator
+    beq :+
+    bcc :+
+    lda midistate + MIDIState::measure
+    sed
+    adc #0 ; carry set, will add the one we want
+    sta midistate + MIDIState::measure
+    lda midistate + MIDIState::measure+1
+    adc #0
+    sta midistate + MIDIState::measure+1
+    cld
+    lda #1
+:   sta midistate + MIDIState::beat
+
+
+@not_beat:
+
     ldx #0
 trackloop:
     ; is track playable? if not, move on
@@ -1327,6 +1444,8 @@ drum:
     beq lyric
     cmp #$01
     beq lyric
+    cmp #$58
+    beq timesig
 
     bra end
 end_of_track:
@@ -1367,8 +1486,7 @@ tempo:
     ; the tracks the same on this tick
     inc midistate + MIDIState::tempochange
 end:
-    jsr advance_to_end_of_chunk
-    rts
+    jmp advance_to_end_of_chunk
 lyric:
     ; don't process first-tick text events
     lda midistate + MIDIState::deltas_processed
@@ -1395,6 +1513,25 @@ lyric:
 @gol:
     sta lyrics+31
     bra @l1
+timesig:
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::timesig_numerator
+    jsr fetch_indirect_byte_decchunk ; denominator shifts (2 = quarter note)
+    sta midistate + MIDIState::timesig_denominator_shifts
+    tax
+    lda #1
+    cpx #0
+    beq :++
+:   asl
+    dex
+    bne :-
+:   sta midistate + MIDIState::timesig_denominator
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::timesig_clocks
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::timesig_32nds_per_quarter
+    jsr calc_deltas_per_beat
+    bra end
 .endproc
 
 .proc shift_lyrics: near

@@ -37,6 +37,7 @@ playback_mode:
 .import do_midi_sprites
 .import do_zsm_sprites
 .import update_instruments
+.import update_midi_beat
 
 .import init_directory
 .import load_directory
@@ -219,6 +220,7 @@ ismidi:
 	jsr do_midi_sprites
 	jsr update_instruments
 	jsr draw_lyric
+	jsr update_midi_beat
 	jsr midi_is_playing
 	bne continue
 	lda jukebox

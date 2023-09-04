@@ -21,6 +21,7 @@
 
 .import ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .import lyrics
+.import midimeasure, midibeat
 .export update_instruments
 .export do_midi_sprites
 .export do_zsm_sprites
@@ -39,6 +40,7 @@
 .export zsm_tuning
 .export zsm_tuning_update
 .export loading_msg
+.export update_midi_beat
 
 .segment "BSS"
 
@@ -253,8 +255,9 @@ CURSOR_PETSCII = $AD
 	jsr X16::Kernal::CHROUT
 	
 	rts
+.endproc
 
-byte_to_hex: ; converts a number to two ASCII/PETSCII hex digits: input A = number to convert, output A = most sig nybble, X = least sig nybble, affects A,X
+.proc byte_to_hex ; converts a number to two ASCII/PETSCII hex digits: input A = number to convert, output A = most sig nybble, X = least sig nybble, affects A,X
 	pha
 
 	and #$0f
@@ -894,6 +897,32 @@ loop:
 	dey
 	bne loop
 
+	rts
+.endproc
+
+.proc update_midi_beat: near
+	ldx #15
+	ldy #59
+	jsr X16::Kernal::PLOT
+
+	; make white on black
+	lda #$90
+	jsr X16::Kernal::CHROUT
+	lda #1
+	jsr X16::Kernal::CHROUT
+	lda #$05
+	jsr X16::Kernal::CHROUT
+
+	lda midimeasure+1
+	jsr byte_to_hex
+	txa ; only print low byte
+	jsr X16::Kernal::CHROUT
+	lda midimeasure
+	jsr print_hex
+	lda #':'
+	jsr X16::Kernal::CHROUT
+	lda midibeat
+	jsr print_hex
 	rts
 .endproc
 
