@@ -1935,4 +1935,4 @@ midilegend1:
     .byte $90,$01,$05,"MIDI CHANNEL",0
 
 midilegend2:
-    .byte $9e,"             BEAT   LOADED",0
+    .byte $9e,"  KEY TEMPO  BEAT   LOADED",0

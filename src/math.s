@@ -2,6 +2,7 @@
 .export multiply16x16
 .export multiply8x8
 .export divide40_24
+.export bin2bcd
 
 .export numerator
 .export denominator
@@ -10,9 +11,12 @@
 .export multiplicand
 .export multiplier
 .export mult_result
+.export bcd_input
+.export bcd_result
 
 .segment "BSS"
 
+bcd_result:
 div_result:
 numerator:
 dividend:
@@ -21,6 +25,7 @@ mult_result:
     .res 4
 denominator:
 divisor:
+bcd_input:
 multiplicand:
     .res 2
 multiplier:
@@ -31,6 +36,70 @@ tmp1:
     .res 1
 
 .segment "CODE"
+
+.proc bin2bcd: near ; 16 bit in, up to 5 bytes out
+    BCD_BITS = 19
+
+    curdigit = tmp1
+    b = bcd_result
+
+    stz bcd_result
+    stz bcd_result+1
+    stz bcd_result+2
+    stz bcd_result+3
+    stz bcd_result+4
+
+    lda #$80 >> ((BCD_BITS - 1) & 3)
+    sta curdigit
+    ldx #(BCD_BITS - 1) >> 2
+    ldy #BCD_BITS - 5    
+
+@loop:
+    ; Trial subtract this bit to A:b
+    sec
+    lda bcd_input
+    sbc bcdTableLo,y
+    sta b
+    lda bcd_input+1
+    sbc bcdTableHi,y
+
+    ; If A:b > bcdNum then bcd_input = A:b
+    bcc @trial_lower
+    sta bcd_input+1
+    lda b
+    sta bcd_input
+
+@trial_lower:
+    ; Copy bit from carry into digit and pick up 
+    ; end-of-digit sentinel into carry
+    rol curdigit
+    dey
+    bcc @loop
+
+    ; Copy digit into result
+    lda curdigit
+    sta bcd_result,x
+    lda #$10  ; Empty digit; sentinel at 4 bits
+    sta curdigit
+    ; If there are digits left, do those
+    dex
+    bne @loop
+    lda bcd_input
+    sta bcd_result
+    rts
+
+bcdTableLo:
+    .byte <10, <20, <40, <80
+    .byte <100, <200, <400, <800
+    .byte <1000, <2000, <4000, <8000
+    .byte <10000, <20000, <40000
+
+bcdTableHi:
+    .byte >10, >20, >40, >80
+    .byte >100, >200, >400, >800
+    .byte >1000, >2000, >4000, >8000
+    .byte >10000, >20000, >40000
+.endproc
 
 .proc multiply8x8: near
     stz multiplicand+1

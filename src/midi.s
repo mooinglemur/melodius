@@ -11,10 +11,12 @@
 .export lyrics
 
 .export midibeat, midimeasure, midi_timesig_numerator, midi_timesig_denominator
+.export midi_tempo, midi_keysig, midi_mode
 
 .import divide40_24
 .import multiply16x16
 .import multiply8x8
+.import bin2bcd
 
 .import numerator
 .import denominator
@@ -22,6 +24,8 @@
 .import multiplicand
 .import multiplier
 .import mult_result
+.import bcd_input
+.import bcd_result
 
 .include "x16.inc"
 
@@ -61,6 +65,7 @@
 
 .struct MIDIState
     tempo                 .dword
+    tempo_bcd_bytes       .dword ; nnn.n
     deltas_per_call_frac  .byte
     deltas_per_call       .word
     calls_per_frame       .byte ; any value besides 2 behaves like 1
@@ -70,6 +75,7 @@
     deltas_processed      .dword ; how far along in the song are we?
     measure               .word  ; BCD, measure number
     beat                  .byte  ; (not BCD) beat number within measure
+    beat_bcd              .byte  ; BCD version of above
     deltas_per_beat       .word
     deltas_til_beat_frac  .byte
     deltas_til_beat       .word
@@ -78,6 +84,8 @@
     timesig_denominator_shifts .byte
     timesig_clocks        .byte
     timesig_32nds_per_quarter  .byte
+    keysig_sharps         .byte ; signed byte, negative for flats
+    keysig_mode           .byte ; 0 for major, 1 for minor
 .endstruct
 
 .struct MIDIChannel
@@ -151,10 +159,13 @@ ympan := ymchannels + YMChannel::pan
 ymatten := ymchannels + YMChannel::atten
 midibend := midichannels + MIDIChannel::pitchbend
 midiinst := midichannels + MIDIChannel::instrument
-midibeat := midistate + MIDIState::beat
+midibeat := midistate + MIDIState::beat_bcd
 midimeasure := midistate + MIDIState::measure
 midi_timesig_numerator := midistate + MIDIState::timesig_numerator
 midi_timesig_denominator := midistate + MIDIState::timesig_denominator
+midi_tempo := midistate + MIDIState::tempo_bcd_bytes
+midi_keysig := midistate + MIDIState::keysig_sharps
+midi_mode := midistate + MIDIState::keysig_mode
 
 .segment "CODE"
 
@@ -588,10 +599,15 @@ trackloop:
     lda #8
     sta midistate + MIDIState::timesig_32nds_per_quarter
 
+    lda #$80
+    sta midistate + MIDIState::keysig_sharps
+    stz midistate + MIDIState::keysig_mode
+
     lda #1
     sta midistate + MIDIState::measure
     stz midistate + MIDIState::measure+1
     sta midistate + MIDIState::beat
+    sta midistate + MIDIState::beat_bcd
 
     jsr calc_deltas_per_beat
 
@@ -632,6 +648,22 @@ trackloop:
     sta midistate + MIDIState::deltas_per_beat + 1
     sta midistate + MIDIState::deltas_til_beat + 1
 
+    ; new time signature resets the beat to 1 and bumps the measure if it wasn't 1
+    lda #1
+    cmp midistate + MIDIState::beat
+    beq @n
+    sta midistate + MIDIState::beat
+    sta midistate + MIDIState::beat_bcd
+    sed
+    lda midistate + MIDIState::measure
+    clc
+    adc #1
+    sta midistate + MIDIState::measure
+    lda midistate + MIDIState::measure+1
+    adc #0
+    sta midistate + MIDIState::measure+1
+    cld
+@n:
     rts
 .endproc
 
@@ -687,18 +719,8 @@ trackloop:
     jsr divide40_24
     ; div_result now contains the deltas per frame
     ; multiplied by 256
-    
-    ; We support either 1 or 2 calls per frame.  If 2, we halve this
-    lda midistate + MIDIState::calls_per_frame
-    cmp #2
-    bne save_deltas
-
-    lsr div_result+2
-    ror div_result+1
-    ror div_result
 
 save_deltas:
-
     lda div_result
     sta midistate + MIDIState::deltas_per_call_frac
     lda div_result+1
@@ -706,6 +728,110 @@ save_deltas:
     lda div_result+2
     sta midistate + MIDIState::deltas_per_call+1
 
+
+    ; convert this result to a decimal tempo 
+    ; shift one byte left for precision's sake
+    stz div_result+4
+    lda div_result+2
+    sta div_result+3
+    lda div_result+1
+    sta div_result+2
+    lda div_result+0
+    sta div_result+1
+    stz div_result+0
+
+    ; (divide by divisions)
+    lda midifile + MIDIFile::divisions
+    sta denominator
+    lda midifile + MIDIFile::divisions+1
+    sta denominator+1
+    stz denominator+2
+
+    jsr divide40_24
+    ; we now have the number of beats per tick*256, multiply it out to 
+    ; beats per minute * 10 (so we can display tenths).  36000 is the number
+    ; of 60Hz ticks per minute times 10
+
+    lda div_result
+    sta multiplicand
+    lda div_result+1
+    sta multiplicand+1
+    lda #<36000
+    sta multiplier
+    lda #>36000
+    sta multiplier+1
+
+    jsr multiply16x16
+
+    ; result is bpm * 10 (w/ fractional byte)
+    lda mult_result
+
+    ; now shift based on the time signature basis (is the tempo per quarter note or something else?)
+    ; this shifts things in the opposite direction from the other place this is used
+    
+    lda midistate + MIDIState::timesig_denominator_shifts
+    dec
+    dec
+    tax
+    bpl @l
+@r:
+    beq @e
+    lsr mult_result+3
+    ror mult_result+2
+    ror mult_result+1
+    ror mult_result+0
+    inx
+    bne @r
+    bra @e
+@l:
+    beq @e
+    asl mult_result
+    rol mult_result+1
+    rol mult_result+2
+    rol mult_result+3
+    dex
+    bne @l
+@e:
+    ; result is litte endian
+    ; tt tt . ff ff
+
+    ; we want it in BCD format tt tf
+    ; while we're doing it, round the 10ths place up generously
+    ; as we probably lost a little bit of precision
+    
+    lda mult_result+1
+    clc
+    adc #$cc
+    lda mult_result+2
+    adc #0
+    sta bcd_input
+    lda mult_result+3
+    adc #0
+    sta bcd_input+1
+
+    jsr bin2bcd ; (uses bcd_input as input, bcd_result as output)
+    lda bcd_result+3
+    sta midistate + MIDIState::tempo_bcd_bytes
+    lda bcd_result+2
+    sta midistate + MIDIState::tempo_bcd_bytes+1
+    lda bcd_result+1
+    sta midistate + MIDIState::tempo_bcd_bytes+2
+    lda bcd_result+0
+    sta midistate + MIDIState::tempo_bcd_bytes+3
+
+    lda midistate + MIDIState::tempo_bcd_bytes
+
+
+    ; We support either 1 or 2 calls per frame.  If 2, we halve this
+    lda midistate + MIDIState::calls_per_frame
+    cmp #2
+    bne end
+
+    lsr midistate + MIDIState::deltas_per_call+1
+    ror midistate + MIDIState::deltas_per_call
+    ror midistate + MIDIState::deltas_per_call_frac
+
+end:
     rts
 .endproc
 
@@ -781,6 +907,12 @@ save_deltas:
     sta midistate + MIDIState::deltas_til_beat+1
 
     ; bump the beat
+    lda midistate + MIDIState::beat_bcd
+    sed
+    clc
+    adc #1
+    cld
+    sta midistate + MIDIState::beat_bcd
     lda midistate + MIDIState::beat
     inc
     cmp midistate + MIDIState::timesig_numerator
@@ -795,6 +927,7 @@ save_deltas:
     sta midistate + MIDIState::measure+1
     cld
     lda #1
+    sta midistate + MIDIState::beat_bcd
 :   sta midistate + MIDIState::beat
 
 
@@ -1445,7 +1578,9 @@ drum:
     cmp #$01
     beq lyric
     cmp #$58
-    beq timesig
+    jeq timesig
+    cmp #$59
+    jeq keysig
 
     bra end
 end_of_track:
@@ -1531,6 +1666,12 @@ timesig:
     jsr fetch_indirect_byte_decchunk
     sta midistate + MIDIState::timesig_32nds_per_quarter
     jsr calc_deltas_per_beat
+    bra end
+keysig:
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::keysig_sharps
+    jsr fetch_indirect_byte_decchunk
+    sta midistate + MIDIState::keysig_mode
     bra end
 .endproc
 

@@ -21,7 +21,7 @@
 
 .import ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .import lyrics
-.import midimeasure, midibeat
+.import midimeasure, midibeat, midi_tempo, midi_keysig, midi_mode
 .export update_instruments
 .export do_midi_sprites
 .export do_zsm_sprites
@@ -902,7 +902,7 @@ loop:
 
 .proc update_midi_beat: near
 	ldx #15
-	ldy #59
+	ldy #49
 	jsr X16::Kernal::PLOT
 
 	; make white on black
@@ -911,6 +911,69 @@ loop:
 	lda #1
 	jsr X16::Kernal::CHROUT
 	lda #$05
+	jsr X16::Kernal::CHROUT
+
+	; write keysig
+	lda midi_keysig
+	cmp #$80
+	beq unspec_keysig
+	clc
+	adc #7
+
+	ldx midi_mode
+	beq :+
+	adc #3 ; minor key offset in table
+
+	; clamp to 0-14 (-7 to +7)
+:	bpl :+
+	adc #12
+	bra :-
+:	cmp #15
+	bcc :+
+	sbc #12
+	bra :-
+
+:	asl
+	tax
+	lda keysigtbl,x
+	jsr X16::Kernal::CHROUT
+	lda keysigtbl+1,x
+	jsr X16::Kernal::CHROUT
+
+	ldx #' '
+	lda midi_mode
+	beq :+
+	ldx #'m'
+:	txa
+	jsr X16::Kernal::CHROUT
+	bra dotempo
+unspec_keysig:
+	lda #'-'
+	jsr X16::Kernal::CHROUT
+	jsr X16::Kernal::CHROUT
+	jsr X16::Kernal::CHROUT
+
+dotempo:
+	lda #' '
+	jsr X16::Kernal::CHROUT
+
+	ldx #0
+	; write tempo
+tl:
+	lda midi_tempo,x
+	clc
+	adc #$30
+	jsr X16::Kernal::CHROUT
+	inx
+	cpx #3
+	bne tl
+	lda #'.'
+	jsr X16::Kernal::CHROUT
+	lda midi_tempo+3
+	clc
+	adc #$30
+	jsr X16::Kernal::CHROUT
+	lda #' '
 	jsr X16::Kernal::CHROUT
 
 	lda midimeasure+1
@@ -924,6 +987,22 @@ loop:
 	lda midibeat
 	jsr print_hex
 	rts
+keysigtbl:
+	.byte "Cb"
+	.byte "Gb"
+	.byte "Db"
+	.byte "Ab"
+	.byte "Eb"
+	.byte "Bb"
+	.byte " F"
+	.byte " C"
+	.byte " G"
+	.byte " D"
+	.byte " A"
+	.byte " E"
+	.byte " B"
+	.byte "F#"
+	.byte "C#"
 .endproc
 
 .proc do_midi_sprites: near
