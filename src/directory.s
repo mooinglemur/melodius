@@ -410,20 +410,46 @@ legloop:
     bra legloop
 
 :   lda jukebox
-    beq off
-    lda #'N'
+    asl
+    tax
+    lda lut,x
+    sta TYP
+    lda lut+1,x
+    sta TYP+1
+    ldx #0
+typloop:
+    lda $ffff,x
+TYP = * - 2
+    beq :+
     jsr X16::Kernal::BSOUT
-    lda #' '
+    inx
+    bra typloop
+:
+    ldx #11
+    ldy #6
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+banloop:
+    lda banner,x
+    beq :+
     jsr X16::Kernal::BSOUT
-    bra end
-off:
-    lda #'F'
-    jsr X16::Kernal::BSOUT
-    jsr X16::Kernal::BSOUT
+    inx
+    bra banloop
+:
 end:
     rts
+banner:
+    .byte "Release 20230906 by MooingLemur",0
 legend:
-    .byte $90,$01,$05,"[F1] TOGGLE JUKEBOX MODE: O",0
+    .byte $90,$01,$05,"[F1] Playback Mode: ",0
+lut:
+    .word type0, type1
+type0:
+    .byte "Single Song",0
+type1:
+    .byte "Sequential ",0
 .endproc
 
 .proc dir_not_playing
