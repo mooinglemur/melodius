@@ -1917,6 +1917,8 @@ volume:
     clc
     adc tmp2
 
+    sta ymchannels + YMChannel::atten,x
+
     phx
     pha
     API_BORDER
