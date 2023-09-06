@@ -15,6 +15,7 @@
 .export legend_jukebox
 .export loadnext
 .export sortdir
+.export scroll_active_file_if_needed
 
 .export files_full_size
 .export files_width
@@ -84,6 +85,10 @@ cactive:
     .res 2
 cplaying:
     .res 2
+hilighted_screen_row_addr:
+    .res 1
+reset_hilight_scroll:
+    .res 1
 preserved_name:
     .res 256
 files_bottom_size:
@@ -1205,6 +1210,8 @@ exit:
     lda #DIR_BANK
     sta X16::Reg::RAMBank
 
+    lda #$80
+    sta reset_hilight_scroll
     ; first go back from cactive and count the number of names that exist
     ; stopping at 12
     lda cactive
@@ -1332,15 +1339,18 @@ displayit:
     sta dptr+1
 
     ; print out the dir
+    lda #$11
+    sta Vera::Reg::AddrH
 rowloop:
-    ; X coordinate goes in Y register and
-    ldy #6
-    ; Y coordinate goes in X register :(
+    ; set VERA pointer
+    lda #(6 << 1) ; x coord, column 6
+    sta Vera::Reg::AddrL
+    ; Y coordinate
     lda row
     clc
-    adc #14
+    adc #(14 + $B0) ; start at row 14 on screen
+    sta Vera::Reg::AddrM
     tax
-    jsr X16::Kernal::PLOT ; carry is clear, set position
 
     ; if this is the selected entry
     lda dptr+1
@@ -1351,22 +1361,12 @@ rowloop:
     bne notactive
 
     ; highlight bg color
-    lda #1
-    jsr X16::Kernal::CHROUT
-    lda #$1f
-    jsr X16::Kernal::CHROUT
-    lda #1
-    jsr X16::Kernal::CHROUT
+    stx hilighted_screen_row_addr
+    ldy #$60
     bra check_isdir
 notactive:
     ; black bg color
-    lda #1
-    jsr X16::Kernal::CHROUT
-    lda #$90
-    jsr X16::Kernal::CHROUT
-    lda #1
-    jsr X16::Kernal::CHROUT
-
+    ldy #$00
 check_isdir:
     lda dptr+1
     cmp mfiles+1
@@ -1378,20 +1378,24 @@ check_isdir:
     bcs isfile
 isdir:
     ; yellow fg
-    lda #$9e
-    jsr X16::Kernal::CHROUT
+    tya
+    ora #$07
+    tay
     bra printit
 isfile:
     ; check to see if this is the one playing
-    lda #$05
+    iny ; 0 to 1
     ldx dptr+1
     cpx cplaying+1
     bne :+
     ldx dptr
     cpx cplaying
     bne :+
-    lda #$9c
-:   jsr X16::Kernal::CHROUT
+    tya
+    and #$f0
+    ora #$04
+    tay
+:   
 printit:
     ldx files_width
     lda (dptr)
@@ -1399,7 +1403,8 @@ printit:
 chrloop:
     lda (dptr)
     beq nextrow
-    jsr X16::Kernal::CHROUT
+    sta Vera::Reg::Data0
+    sty Vera::Reg::Data0
     dex
     beq consumerow
     inc dptr
@@ -1416,7 +1421,8 @@ nextrow:
     cpx #0
     beq padded_row
     lda #$20
-    jsr X16::Kernal::CHROUT
+    sta Vera::Reg::Data0
+    sty Vera::Reg::Data0
     dex
     bra nextrow
 
@@ -1442,6 +1448,84 @@ above:
 below:
     .byte 0
 row:
+    .byte 0
+.endproc
+
+.proc scroll_active_file_if_needed
+    lda cactive
+    sta dptr
+    lda cactive+1
+    sta dptr+1
+
+    lda reset_hilight_scroll
+    beq scrollit
+    stz reset_hilight_scroll
+    ldy #0
+findlength:
+    lda (dptr),y
+    beq :+
+    iny
+    bne findlength
+:   cpy files_width
+    bcs :+
+    stz doscroll ; don't scroll if filename is less than the width of the viewport
+    rts
+:   tya
+    sec
+    sbc files_width
+    sta doscroll
+    lda #120 ; initial pause
+    sta lingertimer
+    stz scrolloffset
+    ldy #0
+    bra displayonce
+scrollit:
+    lda doscroll
+    beq checklastlinger
+    dec lingertimer
+    beq advance
+    rts
+advance:
+    dec doscroll
+    beq lingerlong
+    lda #15
+    sta lingertimer
+    bra display
+lingerlong:
+    lda #120
+    sta lingertimer
+display:
+    inc scrolloffset
+    ldy scrolloffset
+displayonce:
+    lda #(6 << 1)
+    sta Vera::Reg::AddrL
+    lda hilighted_screen_row_addr
+    sta Vera::Reg::AddrM
+    lda #$21
+    sta Vera::Reg::AddrH ; leaving the attribute bytes alone
+    ldx files_width
+:   lda (dptr),y
+    sta Vera::Reg::Data0
+    iny
+    dex
+    bne :-    
+    rts
+checklastlinger:
+    lda lingertimer
+    beq end
+    dec lingertimer
+    bne end
+    ; last tick, start over
+    lda #1
+    sta reset_hilight_scroll
+end:
+    rts
+lingertimer:
+    .byte 0
+doscroll:
+    .byte 0
+scrolloffset:
     .byte 0
 .endproc
 

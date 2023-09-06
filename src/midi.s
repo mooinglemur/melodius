@@ -880,6 +880,7 @@ end:
     stz tracks_playing
     stz track_iter
 
+
     ; calculate beat deltas
     sec
     lda midistate + MIDIState::deltas_til_beat_frac
@@ -894,8 +895,8 @@ end:
     sbc midistate + MIDIState::deltas_per_call+1
     sta midistate + MIDIState::deltas_til_beat+1
 
-    bpl @not_beat
-
+    bpl not_beat
+beat_it:
     ; reset the beat countdown
     clc
     lda midistate + MIDIState::deltas_per_beat
@@ -930,8 +931,11 @@ end:
     sta midistate + MIDIState::beat_bcd
 :   sta midistate + MIDIState::beat
 
+    ; edge-case check: tempo is so incredibly fast that more than one beat ticked in a frame
+    lda midistate + MIDIState::deltas_til_beat+1
+    bmi beat_it 
 
-@not_beat:
+not_beat:
 
     ldx #0
 trackloop:
@@ -1926,14 +1930,14 @@ volume:
     inx
     cpx #YM2151_CHANNELS
     bcc @vollp
-     
+    jmp end
 
 pan:
     ldx midichannel_iter
     lda tmp1
-    cmp #$70
+    cmp #$60
     bcs @right
-    cmp #$10
+    cmp #$20
     bcc @left
 
     lda #3

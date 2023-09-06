@@ -62,6 +62,7 @@ playback_mode:
 .import atten
 .import draw_lyric
 .import draw_zsm_tuning
+.import scroll_active_file_if_needed
 
 .import clear_via_timer
 
@@ -284,6 +285,7 @@ songstopped:
 	jsr dir_not_playing
 	stz playback_mode
 continue:
+	jsr scroll_active_file_if_needed
 	DONE_BORDER
 
 	jsr X16::Kernal::STOP ; test stop key
