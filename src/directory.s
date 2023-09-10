@@ -14,6 +14,7 @@
 .export zsm_callback
 .export legend_jukebox
 .export loadnext
+.export loadrandom
 .export sortdir
 .export scroll_active_file_if_needed
 
@@ -84,6 +85,10 @@ ctop:
 cactive:
     .res 2
 cplaying:
+    .res 2
+filecount:
+    .res 2
+filesdropped:
     .res 2
 hilighted_screen_row_addr:
     .res 1
@@ -441,21 +446,130 @@ banloop:
 end:
     rts
 banner:
-    .byte "Release 20230906 by MooingLemur",0
+    .byte "Release 20230910 by MooingLemur",0
 legend:
     .byte $90,$01,$05,"[F1] Playback Mode: ",0
 lut:
-    .word type0, type1
+    .word type0, type1, type2
 type0:
-    .byte "Single Song",0
+    .byte "Single ",0
 type1:
-    .byte "Sequential ",0
+    .byte "Sequential",0
+type2:
+    .byte "Shuffle   ",0
 .endproc
 
 .proc dir_not_playing
     stz cplaying+1
     inc dir_needs_refresh
     rts
+.endproc
+
+.proc galois16
+    lda seed
+    ora seed+1
+    bne :+
+    jsr X16::Kernal::ENTROPY_GET
+    sta seed
+    sty seed+1  
+    bra galois16
+
+:	ldy #8
+	lda seed+0
+:
+	asl        ; shift the register
+	rol seed+1
+	bcc :+
+	eor #$39   ; apply XOR feedback whenever a 1 bit is shifted out
+:
+	dey
+	bne :--
+	sta seed+0
+	cmp #0     ; reload flags
+	rts
+seed:
+    .byte 0,0
+.endproc
+
+.proc loadrandom
+    lda #DIR_BANK
+    sta X16::Reg::RAMBank
+
+    lda filecount
+    ora filecount+1
+    bne :+
+    sec ; file count zero
+    rts
+:
+    lda mfiles
+    sta dptr
+    lda mfiles+1
+    sta dptr+1
+
+    lda (dptr)
+    bne rando
+    sec ; file list empty
+    rts
+rando:
+    jsr galois16
+    sta advcnt
+    jsr galois16
+    sta advcnt+1
+modulo:
+    lda filecount+1
+    cmp advcnt+1
+    bcc advance
+    beq modulo2
+    bra findit
+modulo2:
+    lda advcnt
+    cmp filecount
+    bcc findit
+advance:
+    lda advcnt
+    sec
+    sbc filecount
+    sta advcnt
+    lda advcnt+1
+    sbc filecount+1
+    sta advcnt+1
+    bra modulo
+adv:
+    inc dptr
+    bne findit
+    inc dptr+1
+findit:
+    ldy #0
+    lda (dptr)
+    bne adv
+    ldy #1
+    lda (dptr),y
+    beq foundit ; we're at the last file, can't go any further
+    lda advcnt
+    bne :+
+    lda advcnt+1
+    beq foundit ; we're at the correct file (the null termination thereof)
+    dec advcnt+1
+:   dec advcnt
+    bra adv
+foundit:
+    ; rewind to previous null
+    lda dptr
+    bne :+
+    dec dptr+1
+:   dec dptr
+    lda (dptr)
+    bne foundit
+    ; now advance by one byte
+    inc dptr
+    bne end
+    inc dptr+1   
+end:
+    jsr dirlist_exec_dptr
+    bcs loadnext
+    rts
+advcnt:
+    .byte 0,0
 .endproc
 
 .proc loadnext
@@ -1612,6 +1726,9 @@ scrolloffset:
     lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
     jsr loading_msg
 
+    stz filecount
+    stz filecount+1
+
     jsr loaddir
 
     lda #0
@@ -1754,6 +1871,10 @@ oq_loop:
     cmp #$22
     bne oq_loop
 
+    inc filecount
+    bne :+
+    inc filecount+1
+:
     ; absorb the name until the close quote
 name_loop:
     jsr X16::Kernal::CHRIN

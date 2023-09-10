@@ -55,6 +55,7 @@ playback_mode:
 .import draw_zsm_ptr
 .import loopctr
 .import loadnext
+.import loadrandom
 .import jukebox
 .import legend_jukebox
 .import zsm_callback
@@ -137,10 +138,13 @@ rekey:
 	beq endkey
 
 	cmp #$85 ; F1
-	bne :+
+	bne :++
+	inc jukebox
 	lda jukebox
-	eor #1
-	sta jukebox
+	cmp #3
+	bcc :+
+	lda #0
+:	sta jukebox
 	jsr legend_jukebox
 	bra rekey
 :
@@ -223,10 +227,14 @@ ismidi:
 	jsr draw_lyric
 	jsr update_midi_beat
 	jsr midi_is_playing
-	bne continue
+	jne continue
 	lda jukebox
 	beq stopmidi
-	jsr loadnext
+	cmp #2
+	bne :+
+	jsr loadrandom
+	bcc continue
+:	jsr loadnext
 	bcc continue
 stopmidi:
 
@@ -270,7 +278,11 @@ zsmck:
 ckloadnext:
 	lda jukebox
 	beq stopzsm
-	jsr loadnext
+	cmp #2
+	bne :+
+	jsr loadrandom
+	bcc continue
+:	jsr loadnext
 	bcc continue
 stopzsm:
 	ldx #0
