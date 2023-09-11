@@ -17,6 +17,7 @@
 .export loadrandom
 .export sortdir
 .export scroll_active_file_if_needed
+.export select_playing_song
 
 .export files_full_size
 .export files_width
@@ -83,6 +84,8 @@ mendsort:
 ctop:
     .res 2
 cactive:
+    .res 2
+cvis:
     .res 2
 cplaying:
     .res 2
@@ -459,6 +462,20 @@ type2:
     .byte "Shuffle   ",0
 .endproc
 
+.proc select_playing_song
+    lda cplaying+1
+    beq end
+    lda cplaying
+    sta cactive
+    sta cvis
+    lda cplaying+1
+    sta cactive+1
+    sta cvis+1
+    inc dir_needs_refresh
+end:
+    rts
+.endproc
+
 .proc dir_not_playing
     stz cplaying+1
     inc dir_needs_refresh
@@ -735,8 +752,10 @@ loadnewfile:
     ; set as playing file
     lda dptr
     sta cplaying
+    sta cvis
     lda dptr+1
     sta cplaying+1
+    sta cvis+1
 
     ; copy filename
     ldy #0
@@ -1284,8 +1303,10 @@ done:
     bne restart
     lda dptr
     sta cactive
+    sta cvis
     lda dptr+1
     sta cactive+1
+    sta cvis+1
     inc dir_needs_refresh
 exit:
     rts
@@ -1294,7 +1315,9 @@ exit:
 .proc dirlist_nav_home
     lda #$a0
     sta cactive+1
+    sta cvis+1
     stz cactive
+    stz cvis
     inc dir_needs_refresh
     rts
 .endproc
@@ -1335,8 +1358,10 @@ bottom_check:
     inc dptr+1
 :   lda dptr
     sta cactive
+    sta cvis
     lda dptr+1
     sta cactive+1
+    sta cvis+1
     dex
     bne findloop
     clc
@@ -1352,11 +1377,11 @@ exit:
 
     lda #$80
     sta reset_hilight_scroll
-    ; first go back from cactive and count the number of names that exist
+    ; first go back from cvis and count the number of names that exist
     ; stopping at 12
-    lda cactive
+    lda cvis
     sta dptr
-    lda cactive+1
+    lda cvis+1
     sta dptr+1
     ldx #0
 find_top_loop:
@@ -1379,9 +1404,9 @@ found_top:
 
     ; go forward from cactive and count the number of names that exist
     ; stopping at 6
-    lda cactive
+    lda cvis
     sta dptr
-    lda cactive+1
+    lda cvis+1
     sta dptr+1
     ldx #0
 find_bot_loop:
@@ -1421,9 +1446,9 @@ found_bot:
 
 find_ctop:
     tax ; go up this many
-    lda cactive
+    lda cvis
     sta dptr
-    lda cactive+1
+    lda cvis+1
     sta dptr+1
 ctop_loop:
     cpx #0
@@ -1593,8 +1618,12 @@ row:
 
 .proc scroll_active_file_if_needed
     lda cactive
+    cmp cvis
+    jne end
     sta dptr
     lda cactive+1
+    cmp cvis+1
+    bne end
     sta dptr+1
 
     lda reset_hilight_scroll
@@ -1754,9 +1783,11 @@ scrolloffset:
     ; look for preserved name
     stz dptr
     stz cactive
+    stz cvis
     lda #$a0
     sta dptr+1
     sta cactive+1
+    sta cvis+1
 
 name_new_row:
     ldx #0
@@ -1780,9 +1811,11 @@ name_found:
     clc
     adc dptr
     sta cactive
+    sta cvis
     lda dptr+1
     sbc #0
     sta cactive+1
+    sta cvis+1
     rts
 name_next:
     inc dptr

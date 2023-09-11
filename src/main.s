@@ -64,6 +64,7 @@ playback_mode:
 .import draw_lyric
 .import draw_zsm_tuning
 .import scroll_active_file_if_needed
+.import select_playing_song
 
 .import clear_via_timer
 
@@ -135,7 +136,7 @@ FRC = * -1
 
 rekey:
 	jsr X16::Kernal::GETIN
-	beq endkey
+	jeq endkey
 
 	cmp #$85 ; F1
 	bne :++
@@ -203,6 +204,12 @@ rekey:
 	bne :+
 	jsr dirlist_exec
 	jcs songstopped
+	jmp rekey
+:
+
+	cmp #$1d ; right arrow
+	bne :+
+	jsr select_playing_song
 	jmp rekey
 :
 endkey:
