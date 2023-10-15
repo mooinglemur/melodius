@@ -449,7 +449,10 @@ banloop:
 end:
     rts
 banner:
-    .byte "Release 20230910 by MooingLemur",0
+    .byte "by MooingLemur, "
+    .byte "built on "
+    .incbin "releasedate.inc"
+    .byte 0
 legend:
     .byte $90,$01,$05,"[F1] Playback Mode: ",0
 lut:

@@ -21,7 +21,7 @@ default: all
 
 all: $(EXE)
 
-$(EXE): $(OBJS) $(CONFIG)
+$(EXE): releasedate $(OBJS) $(CONFIG)
 	$(LD) $(LDFLAGS) $(OBJS) -m $(MAPFILE) -Ln $(SYMFILE) ../zsmkit/lib/zsmkit.lib -o $@ 
 
 $(OBJ)/%.o: $(SRC)/%.s | $(OBJ)
@@ -38,9 +38,12 @@ $(SDCARD): $(EXE)
 	cp $(EXE) ROOT/
 	mcopy -i $(SDCARD)@@1M -o -s -v -m ROOT/* ::
 
-.PHONY: clean run
+.PHONY: clean run releasedate
 clean:
 	$(RM) $(EXE) $(OBJS) $(SDCARD) $(MAPFILE) $(SYMFILE)
+
+releasedate:
+	/bin/echo -n $$(/bin/date '+%Y%m%d') > src/releasedate.inc
 
 box: $(EXE) $(SDCARD)
 	box16 -sdcard $(SDCARD) -prg $(EXE) -run -ram 1024
