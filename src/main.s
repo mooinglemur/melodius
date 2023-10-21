@@ -13,6 +13,8 @@ start:
 .segment "BSS"
 playback_mode:
 	.res 1
+paused:
+	.res 1
 .segment "CODE"
 
 .include "x16.inc"
@@ -21,6 +23,7 @@ playback_mode:
 .endscope
 
 .export playback_mode
+.export paused
 
 .import register_handler
 .import deregister_handler
@@ -65,6 +68,12 @@ playback_mode:
 .import draw_zsm_tuning
 .import scroll_active_file_if_needed
 .import select_playing_song
+.import ticker_behavior
+.import apply_ticker_behavior
+.import errornum
+.import loading_msg
+.import flash_pause_midi
+.import flash_pause_zsm
 
 .import clear_via_timer
 
@@ -93,15 +102,26 @@ main:
 	lda #$0f
 	jsr X16::Kernal::CHROUT
 
-	; get skinny charset
+	; get skinny charset if VGA
+	lda Vera::Reg::DCVideo
+	and #$03
+	cmp #1
+	bne noskinny
+
 	lda #6
 	jsr X16::Kernal::SCREEN_SET_CHARSET
+
+noskinny:
+	lda #0
+	jsr X16::Kernal::MOUSE_CONFIG
 
 	jsr setup_sprites
 	jsr setup_tiles
 ;    jsr setup_instruments
 
 	stz playback_mode
+
+	stz paused
 
 	stz stopping
 
@@ -150,6 +170,47 @@ rekey:
 	bra rekey
 :
 
+	cmp #$89 ; F2
+	bne :++
+	inc ticker_behavior
+	lda ticker_behavior
+	cmp #3
+	bcc :+
+	lda #0
+:	sta ticker_behavior
+	jsr legend_jukebox
+	lda playback_mode
+	cmp #2
+	bne rekey
+	jsr apply_ticker_behavior
+	bra rekey
+:
+
+	cmp #$09 ; tab
+	bne :++
+	lda playback_mode
+	beq rekey
+tabkey:
+	lda jukebox
+	cmp #2
+	beq :+
+	jsr loadnext
+	jmp continue
+:
+	jsr loadrandom
+	jmp continue
+:
+
+	cmp #$18 ; shift-tab
+	bne :+
+	lda playback_mode
+	beq rekey
+	cmp #1
+	beq tabkey
+	inc stopping
+	bra rekey
+:	
+
 	cmp #$91 ; up arrow
 	bne :+
 	lda #1
@@ -161,43 +222,53 @@ rekey:
 	bne :+
 	lda #1
 	jsr dirlist_nav_down
-	bra rekey
+	jmp rekey
 :
 
 	cmp #$82 ; pgup
 	bne :+
 	lda files_full_size
 	jsr dirlist_nav_up
-	bra rekey
+	jmp rekey
 :
 
 	cmp #$02 ; pgdn
 	bne :+
 	lda files_full_size
 	jsr dirlist_nav_down
-	bra rekey
+	jmp rekey
 :
 
 	cmp #$13 ; home
 	bne :+
 	jsr dirlist_nav_home
-	bra rekey
+	jmp rekey
 :
 
 	cmp #$04 ; end
 	bne :+
 	jsr dirlist_nav_end
-	bra rekey
+	jmp rekey
+:
+
+	cmp #$a0 ; shift+space
+	bne :+
+	lda playback_mode
+	cmp #1
+	jeq stopmidi
+	cmp #2
+	jeq stopzsm
+	jmp rekey
 :
 
 	cmp #$20 ; space
 	bne :+
 	lda playback_mode
 	cmp #1
-	beq stopmidi
+	jeq pausemidi
 	cmp #2
-	jeq stopzsm
-	bra rekey
+	jeq pausezsm
+	jmp rekey
 :
 
 	cmp #$0d
@@ -218,6 +289,10 @@ endkey:
 	jsr show_directory
 	jsr legend_jukebox
 	stz dir_needs_refresh
+	lda errornum
+	beq :+
+	jsr loading_msg
+	stz errornum
 :
 
 	VIZ_BORDER
@@ -233,6 +308,8 @@ ismidi:
 	jsr update_instruments
 	jsr draw_lyric
 	jsr update_midi_beat
+	lda paused
+	jne flashpause
 	jsr midi_is_playing
 	jne continue
 	lda jukebox
@@ -240,7 +317,7 @@ ismidi:
 	cmp #2
 	bne :+
 	jsr loadrandom
-	bcc continue
+	jcc continue
 :	jsr loadnext
 	bcc continue
 stopmidi:
@@ -278,6 +355,8 @@ loopck:
 	bcc zsmck
 	inc stopping
 zsmck:
+	lda paused
+	jne flashpause
 	ldx #0
 	jsr zsmkit::zsm_getstate
 	bcs continue
@@ -302,6 +381,7 @@ songstopped:
 	jsr draw_file_box
 	inc dir_needs_refresh
 	jsr dir_not_playing
+	stz paused
 	stz playback_mode
 continue:
 	jsr scroll_active_file_if_needed
@@ -309,14 +389,41 @@ continue:
 
 	jsr X16::Kernal::STOP ; test stop key
 	beq exit
-
-;    bne endless
-
 	jmp endless
+pausezsm:
+	lda paused
+	bne resumezsm
+	ldx #0
+	jsr zsmkit::zsm_stop
+	inc paused
+	jmp endless
+resumezsm:
+	ldx #0
+	jsr zsmkit::zsm_play
+	stz paused
+	jmp flashpause ; unflash
+pausemidi:
+	lda paused
+	bne resumemidi
+	jsr midi_stop
+	inc paused
+	jmp endless
+resumemidi:
+	lda #1
+	jsr midi_play
+	stz paused
+	jmp flashpause ; unflash
+
+
 exit:
 	jsr deregister_handler
 
+	lda #1
+	jsr zsmkit::zsm_init_engine
+
 	JSRFAR AudioAPI::ym_init, $0A
+
+	jsr X16::Kernal::SCINIT
 
 	rts
 
@@ -346,3 +453,14 @@ domidi:
 
 	rts
 
+flashpause:
+	lda playback_mode
+	jeq continue
+	cmp #2
+	beq @zsm
+@midi:
+	jsr flash_pause_midi
+	jmp continue
+@zsm:
+	jsr flash_pause_zsm
+	jmp continue

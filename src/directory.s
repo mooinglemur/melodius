@@ -18,11 +18,14 @@
 .export sortdir
 .export scroll_active_file_if_needed
 .export select_playing_song
+.export apply_ticker_behavior
+.export errornum
 
 .export files_full_size
 .export files_width
 .export loopctr
 .export jukebox
+.export ticker_behavior
 .export stopping
 .export atten
 
@@ -34,6 +37,7 @@
 .import midi_restart
 
 .import playback_mode
+.import paused
 
 .import hide_sprites
 .import draw_file_box
@@ -49,6 +53,9 @@
 .import clear_via_timer
 .import setup_via_timer
 .import use_via_timer
+
+.import flash_pause_zsm
+.import flash_pause_midi
 
 
 .include "x16.inc"
@@ -117,6 +124,8 @@ loopctr:
     .res 1
 jukebox:
     .res 1
+ticker_behavior:
+    .res 1
 stopping:
 	.res 1
 atten:
@@ -126,6 +135,8 @@ stat_cmd:
     .byte "$=T:"
 fn_buf:
     .res 256
+errornum:
+    .res 1
 
 .proc sortdir: near
     
@@ -446,6 +457,39 @@ banloop:
     inx
     bra banloop
 :
+    ldx #6
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+legbloop:
+    lda legendb,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legbloop
+:
+    ldx #7
+    ldy #47
+    clc
+    jsr X16::Kernal::PLOT
+    lda ticker_behavior
+    asl
+    tax
+    lda lutb,x
+    sta TYPB
+    lda lutb+1,x
+    sta TYPB+1
+    ldx #0
+typbloop:
+    lda $ffff,x
+TYPB = * - 2
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra typbloop
+:
+
 end:
     rts
 banner:
@@ -463,6 +507,17 @@ type1:
     .byte "Sequential",0
 type2:
     .byte "Shuffle   ",0
+legendb:
+    .byte $90,$01,$05,"[F2] Use VIA1 timer for ZSM:",0
+lutb:
+    .word type0b, type1b, type2b
+type0b:
+    .byte "When ZSM rate is not 60 Hz",0
+type1b:
+    .byte "Always                    ",0
+type2b:
+    .byte "Never (only use VSYNC)    ",0
+
 .endproc
 
 .proc select_playing_song
@@ -586,6 +641,7 @@ foundit:
     inc dptr+1   
 end:
     jsr dirlist_exec_dptr
+    stz errornum
     bcs loadnext
     rts
 advcnt:
@@ -641,6 +697,7 @@ top:
     rts
 end:
     jsr dirlist_exec_dptr
+    stz errornum
     bcs loadnext
     stz tries
     rts
@@ -787,6 +844,8 @@ fn_done:
 
     jsr check_size_from_listing
     bcc :+
+    lda #3 ; too_big
+    sta errornum
     rts
 
 :   ; open the file to see what it is
@@ -828,6 +887,8 @@ err:
     lda #2
     jsr X16::Kernal::CLOSE
     sec
+    lda #4 ; not recognized
+    sta errornum
     rts
 maybe_midi:
     jsr loader::loadchr
@@ -1113,6 +1174,8 @@ zsm_continue:
     ldy #$a0
     jsr zsmkit::zsm_setmem
 
+    stz paused
+    jsr flash_pause_zsm
     stz loopctr
     stz stopping
     stz atten
@@ -1123,42 +1186,7 @@ zsm_continue:
 	lda #0
 	jsr zsmkit::zsm_setatten
 
-    ldx #0
-    jsr zsmkit::zsm_getrate
-    cpy #0
-    bne @do60
-    cmp #60
-    beq @do60
-    cmp #30
-    beq @do60
-    cmp #20
-    beq @do60
-    cmp #15
-    beq @do60
-    cmp #12
-    beq @do60
-    cmp #10
-    beq @do60
-    cmp #7
-    bcc @do60
-
-@dovia:
-    pha
-    ldy #0
-    jsr zsmkit::zsm_set_int_rate
-    pla
-    jsr setup_via_timer
-    lda #1
-    sta use_via_timer
-
-    bra @zplay
-
-@do60:
-    lda #60
-    ldy #0
-    jsr zsmkit::zsm_set_int_rate
-    stz use_via_timer
-    jsr clear_via_timer
+    jsr apply_ticker_behavior
 
 @zplay:
     ldx #0
@@ -1231,6 +1259,9 @@ piano_loop3:
     ldy #$a0
     jsr midi_parse
 
+    stz paused
+    jsr flash_pause_midi
+
     jsr midi_restart
     lda #1
     jsr midi_play
@@ -1258,6 +1289,60 @@ dotdot:
     .byte "..",0
 tmp_len:
     .byte 0
+.endproc
+
+.proc apply_ticker_behavior
+    php
+    sei
+
+    ldx #0
+    jsr zsmkit::zsm_getrate
+    cpy #0
+    bne @do60
+
+    ldy ticker_behavior
+    cpy #2 ; never use VIA
+    beq @do60
+
+    cmp #60
+    beq @do60
+    cmp #30
+    beq @do60
+    cmp #20
+    beq @do60
+    cmp #15
+    beq @do60
+    cmp #12
+    beq @do60
+    cmp #10
+    beq @do60
+    cmp #7
+    bcc @do60
+
+@dovia:
+    pha
+    ldy #0
+    jsr zsmkit::zsm_set_int_rate
+    pla
+    jsr setup_via_timer
+    lda #1
+    sta use_via_timer
+
+    plp
+    rts
+
+@do60:
+    lda #60
+    ldy ticker_behavior ; 0 = default, 1 = always use via, 2 = never use via
+    cpy #1
+    beq @dovia
+    ldy #0
+    jsr zsmkit::zsm_set_int_rate
+    stz use_via_timer
+    jsr clear_via_timer
+
+    plp
+    rts
 .endproc
 
 .proc dirlist_nav_up
@@ -2148,6 +2233,8 @@ blk:
     stz is_lazy_loading
     stz loopctr
     stz jukebox
+    stz ticker_behavior
+    stz errornum
     rts
 .endproc
 

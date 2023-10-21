@@ -18,6 +18,8 @@
 .import files_full_size
 .import files_width
 .import dir_needs_refresh
+.import errornum
+.import paused
 
 .import ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .import lyrics
@@ -41,6 +43,8 @@
 .export zsm_tuning_update
 .export loading_msg
 .export update_midi_beat
+.export flash_pause_midi
+.export flash_pause_zsm
 
 .segment "BSS"
 
@@ -460,6 +464,77 @@ tuning:
 	.byte $38,$39,$41,$42,$44,$45,$47,$48,$50
 .endproc
 
+.proc flash_pause_zsm
+	ldx #39
+	ldy #67
+	clc
+	jsr X16::Kernal::PLOT
+
+	lda paused
+	beq blank
+
+	jsr X16::Kernal::RDTIM
+	and #$10
+	beq blank
+
+	ldx #0
+:	lda pausetxt,x
+	beq :+
+	jsr X16::Kernal::CHROUT
+	inx
+	bra :-
+:	rts
+
+blank:
+	ldx #0
+:	lda blanktxt,x
+	beq :+
+	jsr X16::Kernal::CHROUT
+	inx
+	bra :-
+:	rts
+blanktxt:
+	.byte $90,$01,$05,"      ",0
+pausetxt:
+	.byte $05,$01,$1f,"PAUSED",0
+.endproc
+
+.proc flash_pause_midi
+	ldx #28
+	ldy #55
+	clc
+	jsr X16::Kernal::PLOT
+
+	lda paused
+	beq blank
+
+	jsr X16::Kernal::RDTIM
+	and #$10
+	beq blank
+
+	ldx #0
+:	lda pausetxt,x
+	beq :+
+	jsr X16::Kernal::CHROUT
+	inx
+	bra :-
+:	rts
+
+blank:
+	ldx #0
+:	lda blanktxt,x
+	beq :+
+	jsr X16::Kernal::CHROUT
+	inx
+	bra :-
+:	rts
+blanktxt:
+	.byte $90,$01,$05,"      ",0
+pausetxt:
+	.byte $05,$01,$1f,"PAUSED",0
+.endproc
+
+
 .proc loading_msg
     ; 0 = loading, 1 = sorting, 2 = preloading pcm
 	asl
@@ -498,21 +573,26 @@ MSG = * - 2
 	inx
 	bra p3
 p4:
+	lda errornum
+	bne :+
 	inc dir_needs_refresh
-
+:
 	rts
 	
 preamble:
 	.byte $1c,$01,$05,0 ; red on white
 msg_idx:
-	.word loadn, sortn, preloadn
+	.word loadn, sortn, preloadn, too_big, unrecognized
 loadn:
 	.byte "    LOADING     ",0
 sortn:
 	.byte "    SORTING     ",0
 preloadn:
 	.byte " PRELOADING PCM ",0
-
+too_big:
+	.byte " FILE TOO LARGE ",0
+unrecognized:
+	.byte "UNKNOWN FILETYPE",0
 .endproc
 
 
