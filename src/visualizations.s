@@ -1589,7 +1589,7 @@ sploop:
 
 	stz midifrac
 	JSRFAR AudioAPI::notecon_psg2midi, $0a
-	bcs high
+	bcs aftertuning
 	stx midinote
 	tya
 	bpl :+
@@ -1617,14 +1617,9 @@ subtuning:
 	dec midinote
 :
 aftertuning:
-
+	; first bounds check
 	lda midinote
-	cmp #108
-high:
-	bcc :+
-	lda #108
-	sta midinote
-:   cmp #12
+    cmp #12
 	bcs :+
 	lda #12
 	sta midinote
@@ -1652,7 +1647,14 @@ high:
 	lda #$04
 	bra aftersq
 notsq:
-	lda #$52
+	cpy #$03
+	bne :+
+	; bring noise waves down an octave visually
+	lda midinote
+	; carry already set for equal
+	sbc #12
+	sta midinote
+:	lda #$52
 	sta PAL
 	lda wav2color,y
 	asl
@@ -1660,6 +1662,20 @@ notsq:
 aftersq:
 	sta tmp1
 	stz tmp2
+
+; recheck midinote bounds
+	lda midinote
+	cmp #108
+high:
+	bcc :+
+	lda #108
+	sta midinote
+:   cmp #12
+	bcs :+
+	lda #12
+	sta midinote
+:
+
 
 chkvol:
 	lda zsmkit::vera_psg_shadow+2,x

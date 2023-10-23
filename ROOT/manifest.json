@@ -1,0 +1,8 @@
+{
+    "manifest_version": "1.0.0",
+    "name": "Melodius",
+    "author": "MooingLemur",
+    "app_version": "20231022",
+    "license": "MIT",
+    "start_prg": "MELODIUS.PRG"
+}

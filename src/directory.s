@@ -457,6 +457,7 @@ banloop:
     inx
     bra banloop
 :
+
     ldx #6
     ldy #42
     clc
@@ -490,6 +491,46 @@ TYPB = * - 2
     bra typbloop
 :
 
+    ldx #9
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+legcloop:
+    lda legendc,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legcloop
+:
+    ldx #10
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+
+legdloop:
+    lda legendd,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legdloop
+
+:
+    ldx #11
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+
+legeloop:
+    lda legende,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legeloop
+
+:
 end:
     rts
 banner:
@@ -508,7 +549,7 @@ type1:
 type2:
     .byte "Shuffle   ",0
 legendb:
-    .byte $90,$01,$05,"[F2] Use VIA1 timer for ZSM:",0
+    .byte "[F2] Use VIA1 timer for ZSM:",0
 lutb:
     .word type0b, type1b, type2b
 type0b:
@@ -517,6 +558,14 @@ type1b:
     .byte "Always                    ",0
 type2b:
     .byte "Never (only use VSYNC)    ",0
+legendc:
+    .byte "[Enter] Load  [Space] (Un)pause",0
+legendd:
+    .byte "[Up/Dn/PgUp/PgDn/Home/End] Move",0
+legende:
+    .byte "[Tab] Next   [Shift+Space] Stop",0
+
+
 
 .endproc
 
@@ -720,8 +769,8 @@ tries:
 :
     jsr dir_not_playing
     stz playback_mode
-    lda #$07
-    jsr X16::Kernal::BSOUT
+;    lda #$07
+;    jsr X16::Kernal::BSOUT
     sec
     rts
 .endproc
