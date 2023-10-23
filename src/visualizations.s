@@ -435,7 +435,7 @@ sign:
 
 	lda zsm_tuning
 	bpl pos
-	eor $ff
+	eor #$ff
 	inc
 pos:
 	lsr
@@ -1624,7 +1624,7 @@ aftertuning:
 	lda #12
 	sta midinote
 :
-
+	
 	stz pitchdown
 	stz panright
 
