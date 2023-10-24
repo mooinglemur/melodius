@@ -1589,8 +1589,10 @@ sploop:
 
 	stz midifrac
 	JSRFAR AudioAPI::notecon_psg2midi, $0a
-	bcs aftertuning
-	stx midinote
+	bcc :+
+	ldx #127
+	ldy #$7f
+:	stx midinote
 	tya
 	bpl :+
 	inc midinote
