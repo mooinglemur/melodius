@@ -12,7 +12,6 @@
 .export check_lazy_load
 .export loader_get_ptr
 .export zsm_callback
-.export legend_jukebox
 .export loadnext
 .export loadrandom
 .export sortdir
@@ -49,6 +48,11 @@
 .import zsm_tuning_update
 .import clear_zsm_tuning
 .import loading_msg
+.import draw_zsm_viz
+.import draw_midi_viz
+.import external_midi_io
+.import midi_ext_enable
+.import midi_set_external
 
 .import clear_via_timer
 .import setup_via_timer
@@ -413,160 +417,6 @@ loader_get_ptr := loader::loader_get_ptr
     jsr X16::Kernal::CLOSE
 done:
     rts
-.endproc
-
-.proc legend_jukebox
-    ldx #4
-    ldy #42
-    clc
-    jsr X16::Kernal::PLOT
-    ldx #0
-legloop:
-    lda legend,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra legloop
-
-:   lda jukebox
-    asl
-    tax
-    lda lut,x
-    sta TYP
-    lda lut+1,x
-    sta TYP+1
-    ldx #0
-typloop:
-    lda $ffff,x
-TYP = * - 2
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra typloop
-:
-    ldx #11
-    ldy #6
-    clc
-    jsr X16::Kernal::PLOT
-
-    ldx #0
-banloop:
-    lda banner,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra banloop
-:
-
-    ldx #6
-    ldy #42
-    clc
-    jsr X16::Kernal::PLOT
-    ldx #0
-legbloop:
-    lda legendb,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra legbloop
-:
-    ldx #7
-    ldy #47
-    clc
-    jsr X16::Kernal::PLOT
-    lda ticker_behavior
-    asl
-    tax
-    lda lutb,x
-    sta TYPB
-    lda lutb+1,x
-    sta TYPB+1
-    ldx #0
-typbloop:
-    lda $ffff,x
-TYPB = * - 2
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra typbloop
-:
-
-    ldx #9
-    ldy #42
-    clc
-    jsr X16::Kernal::PLOT
-    ldx #0
-legcloop:
-    lda legendc,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra legcloop
-:
-    ldx #10
-    ldy #42
-    clc
-    jsr X16::Kernal::PLOT
-    ldx #0
-
-legdloop:
-    lda legendd,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra legdloop
-
-:
-    ldx #11
-    ldy #42
-    clc
-    jsr X16::Kernal::PLOT
-    ldx #0
-
-legeloop:
-    lda legende,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra legeloop
-
-:
-end:
-    rts
-banner:
-    .byte "by MooingLemur, "
-    .byte "built on "
-    .incbin "releasedate.inc"
-    .byte 0
-legend:
-    .byte $90,$01,$05,"[F1] Playback Mode: ",0
-lut:
-    .word type0, type1, type2
-type0:
-    .byte "Single ",0
-type1:
-    .byte "Sequential",0
-type2:
-    .byte "Shuffle   ",0
-legendb:
-    .byte "[F2] Use VIA1 timer for ZSM:",0
-lutb:
-    .word type0b, type1b, type2b
-type0b:
-    .byte "When ZSM rate is not 60 Hz",0
-type1b:
-    .byte "Always                    ",0
-type2b:
-    .byte "Never (only use VSYNC)    ",0
-legendc:
-    .byte "[Enter] Load  [Space] (Un)pause",0
-legendd:
-    .byte "[Up/Dn/PgUp/PgDn/Home/End] Move",0
-legende:
-    .byte "[Tab] Next   [Shift+Space] Stop",0
-
-
-
 .endproc
 
 .proc select_playing_song
@@ -963,105 +813,10 @@ maybe_zsm:
 
     ; assuming this is ZSM
     ; resize window as such
-    ldx #34
-    ldy #7
-    jsr draw_file_box
-    jsr show_directory
-    jsr legend_jukebox
-    jsr clear_zsm_tuning
+    jsr draw_zsm_viz
 
     lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
     jsr loading_msg
-
-    ; draw pianos
-    ldx #12
-    ldy #13
-    lda #0
-piano_loop1:
-    jsr draw_pianos
-    sta Vera::Reg::Data0 ; this puts the number under the pianos
-    inx
-    inc
-    cmp #16
-    bcc piano_loop1
-
-    lda #0
-    ldx #3
-piano_loop2:
-    jsr draw_pianos
-    sta Vera::Reg::Data0 ; this puts the number under the pianos
-    inx
-    inc
-    cmp #8
-    bcc piano_loop2
-
-    ; draw window for PCM
-    VERA_SET_ADDR $87ba, 8
-    lda #$20
-    ldx #8
-:   sta Vera::Reg::Data0
-    dex
-    bne :-
-
-    ; legend text
-    ldy #7
-    ldx #56 ; x/y swapped for plot
-    clc
-    jsr X16::Kernal::PLOT
-
-    ldx #0
-lloop1:
-    lda legend1,x
-    beq :+
-    jsr X16::Kernal::CHROUT
-    inx
-    bne lloop1
-:
-
-    ldy #32
-    ldx #56 ; x/y swapped for plot
-    clc
-    jsr X16::Kernal::PLOT
-
-    ldx #0
-lloop2:
-    lda legend2,x
-    beq :+
-    jsr X16::Kernal::CHROUT
-    inx
-    bne lloop2
-:
-
-
-    ldy #61
-    ldx #34 ; x/y swapped for plot
-    clc
-    jsr X16::Kernal::PLOT
-
-    ldx #0
-lloop3:
-    lda legend3,x
-    beq :+
-    jsr X16::Kernal::CHROUT
-    inx
-    bne lloop3
-:
-
-    ldy #68
-    ldx #30 ; x/y swapped for plot
-    clc
-    jsr X16::Kernal::PLOT
-
-    ldx #0
-lloop4:
-    lda legend4,x
-    beq :+
-    jsr X16::Kernal::CHROUT
-    inx
-    bne lloop4
-:
-
-
 
     ; eat 3 bytes (loop point)
     ldx #3
@@ -1252,47 +1007,7 @@ zsm_continue:
     rts
 load_midi:
     ; is MIDI, resize window as such
-    ldx #15
-    ldy #20
-    jsr draw_file_box
-    jsr show_directory
-    jsr legend_jukebox
-
-    ldx #56
-    ldy #52
-    jsr X16::Kernal::PLOT
-
-    ldx #0
-:   lda midilegend1,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra :-
-:
-
-    ldx #14
-    ldy #47
-    jsr X16::Kernal::PLOT
-
-    ldx #0
-:   lda midilegend2,x
-    beq :+
-    jsr X16::Kernal::BSOUT
-    inx
-    bra :-
-:
-
-
-    ldx #21
-    ldy #13
-    lda #0
-piano_loop3:
-    jsr draw_pianos
-    sta Vera::Reg::Data0 ; this puts the number under the pianos
-    inx
-    inc
-    cmp #16
-    bcc piano_loop3
+    jsr draw_midi_viz
 
     lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
     jsr loading_msg
@@ -2284,6 +1999,11 @@ blk:
     stz jukebox
     stz ticker_behavior
     stz errornum
+    stz external_midi_io
+    ldx #16
+:   stz midi_ext_enable-1,x
+    dex
+    bne :-
     rts
 .endproc
 
@@ -2314,28 +2034,4 @@ end:
     rts
 .endproc
 
-legend1:
-    .byte $90,$01,$05,"YM2151 CHANNEL",0
 
-legend2:
-    .byte "VERA PSG CHANNEL",0
-
-legend3:
-    .byte 'V',$11,$9d
-    .byte 'E',$11,$9d
-    .byte 'R',$11,$9d
-    .byte 'A',$11,$11,$9d
-    .byte 'P',$11,$9d
-    .byte 'C',$11,$9d
-    .byte 'M',0               
-
-legend4:
-    .byte $9e,"LOOP",$11,$11,$11,$9d,$9d,$9d,$9d,$9d
-    .byte "CURSOR",$11,$11,$11,$9d,$9d,$9d,$9d,$9d,$9d
-    .byte "LOADED",$05,0
-
-midilegend1:
-    .byte $90,$01,$05,"MIDI CHANNEL",0
-
-midilegend2:
-    .byte $9e,"  KEY TEMPO  BEAT   LOADED",0

@@ -14,6 +14,9 @@
 .import set_dir_box_size
 .import loader_get_ptr
 .import playback_mode
+.import ticker_behavior
+.import jukebox
+.import show_directory
 
 .import files_full_size
 .import files_width
@@ -23,7 +26,10 @@
 
 .import ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .import lyrics
+.import midi_set_external
+.import midi_serial_init
 .import midimeasure, midibeat, midi_tempo, midi_keysig, midi_mode
+.import vis_ext_ch, vis_ext_note
 .export update_instruments
 .export do_midi_sprites
 .export do_zsm_sprites
@@ -45,6 +51,13 @@
 .export update_midi_beat
 .export flash_pause_midi
 .export flash_pause_zsm
+.export draw_zsm_viz
+.export draw_midi_viz
+.export legend_jukebox
+.export menu_options
+.export external_midi_io
+.export midi_ext_enable
+
 
 .segment "BSS"
 
@@ -72,6 +85,10 @@ zsm_tuning:
 	.res 1
 zsm_tuning_update:
 	.res 1
+external_midi_io:
+    .res 1
+midi_ext_enable:
+	.res 16
 
 .segment "ZEROPAGE"
 visptr:
@@ -251,6 +268,175 @@ p129: .byte "PERCUSSION  "
 CURSOR_LINGER = $68
 CURSOR_PETSCII = $AD
 
+.proc draw_midi_viz
+    ldx #15
+    ldy #20
+    jsr draw_file_box
+    jsr show_directory
+    jsr legend_jukebox
+
+    ldx #56
+    ldy #52
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+:   lda midilegend1,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra :-
+:
+
+    ldx #14
+    ldy #47
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+:   lda midilegend2,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra :-
+:
+
+
+    ldx #21
+    ldy #13
+    lda #0
+piano_loop3:
+    jsr draw_pianos
+    sta Vera::Reg::Data0 ; this puts the number under the pianos
+    inx
+    inc
+    cmp #16
+    bcc piano_loop3
+
+	rts
+
+midilegend1:
+    .byte $90,$01,$05,"MIDI CHANNEL",0
+
+midilegend2:
+    .byte $9e,"  KEY TEMPO  BEAT   LOADED",0
+
+.endproc
+
+.proc draw_zsm_viz
+    ldx #34
+    ldy #7
+    jsr draw_file_box
+    jsr show_directory
+    jsr legend_jukebox
+    jsr clear_zsm_tuning
+
+    ; draw pianos
+    ldx #12
+    ldy #13
+    lda #0
+piano_loop1:
+    jsr draw_pianos
+    sta Vera::Reg::Data0 ; this puts the number under the pianos
+    inx
+    inc
+    cmp #16
+    bcc piano_loop1
+
+    lda #0
+    ldx #3
+piano_loop2:
+    jsr draw_pianos
+    sta Vera::Reg::Data0 ; this puts the number under the pianos
+    inx
+    inc
+    cmp #8
+    bcc piano_loop2
+
+    ; draw window for PCM
+    VERA_SET_ADDR $87ba, 8
+    lda #$20
+    ldx #8
+:   sta Vera::Reg::Data0
+    dex
+    bne :-
+
+    ; legend text
+    ldy #7
+    ldx #56 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop1:
+    lda legend1,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop1
+:
+
+    ldy #32
+    ldx #56 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop2:
+    lda legend2,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop2
+:
+
+
+    ldy #61
+    ldx #34 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop3:
+    lda legend3,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop3
+:
+
+    ldy #68
+    ldx #30 ; x/y swapped for plot
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+lloop4:
+    lda legend4,x
+    beq :+
+    jsr X16::Kernal::CHROUT
+    inx
+    bne lloop4
+:
+	rts
+legend1:
+    .byte $90,$01,$05,"YM2151 CHANNEL",0
+
+legend2:
+    .byte "VERA PSG CHANNEL",0
+
+legend3:
+    .byte 'V',$11,$9d
+    .byte 'E',$11,$9d
+    .byte 'R',$11,$9d
+    .byte 'A',$11,$11,$9d
+    .byte 'P',$11,$9d
+    .byte 'C',$11,$9d
+    .byte 'M',0               
+
+legend4:
+    .byte $9e,"LOOP",$11,$11,$11,$9d,$9d,$9d,$9d,$9d
+    .byte "CURSOR",$11,$11,$11,$9d,$9d,$9d,$9d,$9d,$9d
+    .byte "LOADED",$05,0
+.endproc
 
 .proc print_hex
 	jsr byte_to_hex
@@ -283,6 +469,161 @@ xf_hexify:
 @nothex:
 	eor #%00110000
 	rts
+.endproc
+
+
+.proc legend_jukebox
+    ldx #4
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+legloop:
+    lda legend,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legloop
+
+:   lda jukebox
+    asl
+    tax
+    lda lut,x
+    sta TYP
+    lda lut+1,x
+    sta TYP+1
+    ldx #0
+typloop:
+    lda $ffff,x
+TYP = * - 2
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra typloop
+:
+    ldx #11
+    ldy #6
+    clc
+    jsr X16::Kernal::PLOT
+
+    ldx #0
+banloop:
+    lda banner,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra banloop
+:
+
+    ldx #6
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+legbloop:
+    lda legendb,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legbloop
+:
+    ldx #7
+    ldy #47
+    clc
+    jsr X16::Kernal::PLOT
+    lda ticker_behavior
+    asl
+    tax
+    lda lutb,x
+    sta TYPB
+    lda lutb+1,x
+    sta TYPB+1
+    ldx #0
+typbloop:
+    lda $ffff,x
+TYPB = * - 2
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra typbloop
+:
+
+    ldx #9
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+legcloop:
+    lda legendc,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legcloop
+:
+    ldx #10
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+
+legdloop:
+    lda legendd,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legdloop
+
+:
+    ldx #11
+    ldy #42
+    clc
+    jsr X16::Kernal::PLOT
+    ldx #0
+
+legeloop:
+    lda legende,x
+    beq :+
+    jsr X16::Kernal::BSOUT
+    inx
+    bra legeloop
+
+:
+end:
+    rts
+banner:
+    .byte "by MooingLemur, "
+    .byte "built on "
+    .incbin "releasedate.inc"
+    .byte 0
+legend:
+    .byte $90,$01,$05,"[F1] Playback Mode: ",0
+lut:
+    .word type0, type1, type2
+type0:
+    .byte "Single ",0
+type1:
+    .byte "Sequential",0
+type2:
+    .byte "Shuffle   ",0
+legendb:
+    .byte "[F2] Use VIA1 timer for ZSM:",0
+lutb:
+    .word type0b, type1b, type2b
+type0b:
+    .byte "When ZSM rate is not 60 Hz",0
+type1b:
+    .byte "Always                    ",0
+type2b:
+    .byte "Never (only use VSYNC)    ",0
+legendc:
+    .byte "[Enter] Load  [Space] (Un)pause",0
+legendd:
+    .byte "[Up/Dn/PgUp/PgDn/Home/End] Move",0
+legende:
+    .byte "[Tab] Next   [Shift+Space] Stop",0
+
+
+
 .endproc
 
 ; Input: .X = y coord, .Y = x coord
@@ -816,17 +1157,6 @@ midiloop:
 	stz Vera::Reg::Data0
 	rts
 
-get_decimal:
-	ldy #'0'
-	cmp #10
-	bcc :+
-	sec
-	sbc #10
-	ldy #'1'
-:   clc
-	adc #'0'
-	rts
-
 point_cursor:
 	; position the text cursor
 	phx ; save our midi channel iterator
@@ -844,6 +1174,18 @@ point_cursor:
 	plx ; Y coordinate goes in X register :(
 	jsr X16::Kernal::PLOT ; carry is clear, set position
 	plx ; restore midi channel iterator
+	rts
+.endproc
+
+.proc get_decimal
+	ldy #'0'
+	cmp #10
+	bcc :+
+	sec
+	sbc #10
+	ldy #'1'
+:   clc
+	adc #'0'
 	rts
 .endproc
 
@@ -1244,9 +1586,77 @@ splend:
 	inc iterator
 	ldx iterator
 	cpx #8
-	bcs end
+	bcs ext
 	jmp sploop
 
+ext:
+	; now we do external MIDI sprites
+	stz iterator
+ext_loop:
+	ldx iterator
+	lda vis_ext_ch,x
+	bmi ext_hideit
+
+	; address 0 contains the external sprite for now
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+
+	; multiply MIDI channel by 16
+	lda vis_ext_ch,x
+	asl
+	asl
+	asl
+	asl
+	
+	; add #320 and drop the X coord
+	clc
+	adc #<(336)
+	sta Vera::Reg::Data0
+	lda #>(336)
+	adc #0
+	sta Vera::Reg::Data0
+
+	; note is Y coord
+	lda #255
+	sec
+	sbc vis_ext_note,x
+	sbc vis_ext_note,x
+
+	; bring it downward on the screen by 194
+	clc
+	adc #194
+	sta Vera::Reg::Data0
+
+	lda #0
+	adc #0
+	sta Vera::Reg::Data0
+
+	; set the Z depth / flip
+	lda #$0C
+	sta Vera::Reg::Data0
+
+	; get channel volume (attenuation)
+	lda #0 ; always 0 here
+	; set 16x16
+	adc #$52 ; and pal offset 2
+	sta Vera::Reg::Data0
+	bra ext_end
+
+ext_hideit:
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+	stz Vera::Reg::Data0
+ext_end:
+	inc iterator
+	ldx iterator
+	cpx #32
+	bcs end
+	jmp ext_loop
 end:
 	rts
 .endproc
@@ -2124,23 +2534,23 @@ note_arrow:
 	.byte $00,$00,$00,$00,$00,$00,$00,$00
 
 
-note_blocked:
+note_blocked: ; repurposed for external midi
 	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$01,$11,$11,$11,$00,$00
-	.byte $00,$00,$11,$11,$11,$11,$10,$00 
-	.byte $00,$01,$11,$00,$00,$01,$11,$00 
-	.byte $00,$11,$10,$00,$00,$01,$11,$10
-	.byte $01,$11,$00,$00,$00,$11,$11,$11 
-	.byte $01,$10,$00,$00,$01,$11,$00,$11
-	.byte $01,$10,$00,$00,$11,$10,$00,$11
-	.byte $01,$10,$00,$01,$11,$00,$00,$11 
-	.byte $01,$10,$00,$11,$10,$00,$00,$11 
-	.byte $01,$10,$01,$11,$00,$00,$00,$11
-	.byte $01,$11,$11,$10,$00,$00,$01,$11
-	.byte $00,$11,$11,$00,$00,$00,$11,$10
-	.byte $00,$01,$11,$00,$00,$01,$11,$00
-	.byte $00,$00,$11,$11,$11,$11,$10,$00
-	.byte $00,$00,$01,$11,$11,$11,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $14,$14,$14,$14,$14,$14,$14,$14
+	.byte $1F,$1F,$1F,$1F,$1F,$1F,$1F,$1F
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $00,$00,$00,$00,$00,$00,$00,$00
 
 .endproc
 
@@ -2364,4 +2774,192 @@ rptloop:
 	rts
 rpt:
 	.byte 0
+.endproc
+
+.proc menu_options
+	jsr hide_sprites
+
+	; draw the options menu
+    ldx #25
+    ldy #0
+	clc
+    jsr X16::Kernal::PLOT
+
+	lda #$95
+	jsr X16::Kernal::CHROUT
+	lda #$01
+	jsr X16::Kernal::CHROUT
+	lda #$05
+	jsr X16::Kernal::CHROUT
+
+	ldy #10
+boxloop:
+	phy
+	ldx #0
+rleloop:
+	ldy boxrle,x
+	beq rleend
+	inx
+	lda boxrle,x
+	inx
+innerrle:
+	jsr X16::Kernal::CHROUT
+	dey
+	bne innerrle
+	bra rleloop
+rleend:
+	lda #13
+	jsr X16::Kernal::CHROUT
+	ply
+	dey
+	bne boxloop
+redraw:
+	lda #$95
+	jsr X16::Kernal::CHROUT
+	lda #$01
+	jsr X16::Kernal::CHROUT
+	lda #$05
+	jsr X16::Kernal::CHROUT
+
+    ldx #26
+    ldy #13
+	clc
+    jsr X16::Kernal::PLOT
+
+	lda #'I'
+	jsr X16::Kernal::CHROUT
+	lda #'O'
+	jsr X16::Kernal::CHROUT
+	lda #' '
+	jsr X16::Kernal::CHROUT
+	lda external_midi_io
+	jsr print_hex
+
+    ldx #27
+    ldy #13
+	clc
+    jsr X16::Kernal::PLOT
+
+	lda #'C'
+	jsr X16::Kernal::CHROUT
+	lda #'H'
+	jsr X16::Kernal::CHROUT
+	lda #' '
+	jsr X16::Kernal::CHROUT
+	ldx #0
+chloop:
+	lda #$05
+	bit midi_ext_enable,x
+	bpl :+
+	lda #$96
+:	jsr X16::Kernal::CHROUT
+	txa
+	inc
+	jsr get_decimal
+	pha
+	tya
+	jsr X16::Kernal::CHROUT
+	pla
+	jsr X16::Kernal::CHROUT
+	lda #' '
+	jsr X16::Kernal::CHROUT
+	inx
+	cpx #16
+	bcc chloop
+
+rekey:
+	jsr X16::Kernal::GETIN
+	cmp #13 ; enter
+	beq exit_menu
+	cmp #27 ; esc
+	beq exit_menu
+	cmp #$9d ; left arrow
+	beq dec_io
+	cmp #$1d ; right arrow
+	beq inc_io
+	cmp #$30
+	bcc rekey
+	cmp #$3a
+	bcc midi_channel_toggle
+	cmp #$61
+	bcc rekey
+	cmp #$67
+	bcs rekey
+midi_channel_toggle:
+	sec
+	sbc #$31
+	cmp #$ff
+	bne :+
+	lda #9
+:	cmp #10
+	bcc :+
+	sbc #6+32 ; bring a-f down to 10-15
+:	tax
+	lda #$80
+	eor midi_ext_enable,x
+	sta midi_ext_enable,x
+	asl
+	txa
+	jsr midi_set_external
+	jmp redraw
+dec_io:
+	lda external_midi_io
+	jeq redraw
+	cmp #$68
+	bcs trydec
+	stz external_midi_io
+	jmp redraw
+trydec:
+	sec
+	sbc #$08
+	sta external_midi_io
+	jmp redraw
+inc_io:
+	lda external_midi_io
+	cmp #$60
+	bcs tryinc
+	lda #$60
+	sta external_midi_io
+	jmp redraw
+tryinc:
+	cmp #$f8
+	jcs redraw
+	adc #$08
+	sta external_midi_io
+	jmp redraw
+
+exit_menu:
+	; init serial
+	lda external_midi_io
+	jsr midi_serial_init
+
+	lda #$90
+	jsr X16::Kernal::CHROUT
+	lda #$01
+	jsr X16::Kernal::CHROUT
+	lda #$05
+	jsr X16::Kernal::CHROUT
+
+	lda #$93
+	jsr X16::Kernal::CHROUT
+	lda playback_mode
+	beq notplaying
+	cmp #1
+	beq midi
+	cmp #2
+	beq zsm
+	rts
+notplaying:
+	jsr show_directory
+	jsr legend_jukebox
+	rts
+midi:
+	jsr draw_midi_viz
+	jsr setup_instruments
+	rts
+zsm:
+	jsr draw_zsm_viz
+	rts
+boxrle:
+	.byte 12,$1d,56,$20,0
 .endproc

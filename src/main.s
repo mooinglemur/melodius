@@ -33,6 +33,9 @@ paused:
 .import midi_restart
 .import midi_is_playing
 
+.import midi_init
+.import midi_serial_init
+
 .import setup_tiles
 .import setup_sprites
 .import hide_sprites
@@ -74,6 +77,7 @@ paused:
 .import loading_msg
 .import flash_pause_midi
 .import flash_pause_zsm
+.import menu_options
 
 .import clear_via_timer
 
@@ -136,6 +140,7 @@ noskinny:
 
 	jsr register_handler
 
+	jsr midi_init
 	jsr init_directory
 
 	ldx #34
@@ -186,6 +191,12 @@ rekey:
 	bra rekey
 :
 
+	cmp #$86 ; F3
+	bne :+
+	jsr menu_options
+	bra rekey
+:
+
 	cmp #$09 ; tab
 	bne :++
 	lda playback_mode
@@ -215,7 +226,7 @@ tabkey:
 	bne :+
 	lda #1
 	jsr dirlist_nav_up
-	bra rekey
+	jmp rekey
 :
 
 	cmp #$11 ; down arrow

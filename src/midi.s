@@ -1,14 +1,20 @@
 .macpack longbranch
 
+.export midi_init
 .export midi_parse
 .export midi_play
 .export midi_playtick
 .export midi_restart
 .export midi_is_playing
 .export midi_stop
+.export midi_set_external
+
+.export midi_serial_init
 
 .export ymnote, yminst, ymmidi, midibend, ympan, ymatten, midiinst
 .export lyrics
+
+.export vis_ext_ch, vis_ext_note
 
 .export midibeat, midimeasure, midi_timesig_numerator, midi_timesig_denominator
 .export midi_tempo, midi_keysig, midi_mode
@@ -38,6 +44,34 @@
 .define MAX_TRACKS 32
 .define MIDI_CHANNELS 16
 .define YM2151_CHANNELS 8
+.define EXT_POLY 32
+
+.define IO_BASE $9F00
+.define MIDI_SERIAL_DIVISOR 37
+
+; Define the registers of the TL16C2550PFBR
+.define sRHR 0 ; Receive Holding Register
+.define sTHR 0 ; Transmit Holding Register
+.define sIER 1 ; Interrupt Enable Register
+.define sFCR 2 ; FIFO Control Register
+.define sLCR 3 ; Line Control Register
+.define sMCR 4 ; Modem Control Register
+.define sLSR 5 ; Line Status Register
+.define sMSR 6 ; Modem Status Register
+.define sDLL 0 ; Divisor Latch LSB
+.define sDLM 1 ; Divisor Latch MSB
+
+; Define some bit masks for the registers
+.define LCR_DLAB $80 ; Divisor Latch Access Bit
+.define LCR_WLS8 $03 ; Word Length Select: 8 bits
+.define FCR_FIFOE $01 ; FIFO Enable
+.define FCR_RFIFOR $02 ; Receiver FIFO Reset
+.define FCR_XFIFOR $04 ; Transmitter FIFO Reset
+.define MCR_DTR $01 ; Data Terminal Ready
+.define MCR_RTS $02 ; Request To Send
+.define LSR_THRE $20 ; Transmitter Holding Register Empty
+.define LSR_DR $01 ; Data Ready
+
 
 .struct MIDIFile
     startbank   .byte
@@ -99,6 +133,7 @@
     pbdepth     .byte MIDI_CHANNELS ; depth, 0-12 of pitch bend
     rpnlsb      .byte MIDI_CHANNELS ; currently understood only for pitch bend depth
     rpnmsb      .byte MIDI_CHANNELS ; currently understood only for pitch bend depth
+    ext_enable  .byte MIDI_CHANNELS ; means we route this to external MIDI
 .endstruct
 
 .struct YMChannel
@@ -112,7 +147,6 @@
     velocity    .byte YM2151_CHANNELS
     atten       .byte YM2151_CHANNELS
 .endstruct
-
 
 .segment "ZEROPAGE"
 midizp:
@@ -151,6 +185,11 @@ tmp1:
     .res 1 ; assumed free to use at all times but unsafe after jsr
 tmp2:
     .res 1 ; assumed free to use at all times but unsafe after jsr
+; for visualizing external midi notes
+vis_ext_note:
+    .res EXT_POLY
+vis_ext_ch:
+    .res EXT_POLY
 
 ymnote := ymchannels + YMChannel::note
 yminst := ymchannels + YMChannel::instrument 
@@ -486,6 +525,40 @@ error:
     rts
 .endproc
 
+; Input: .A = MIDI channel
+;        .C = set for external, clear for internal
+.proc midi_set_external: near
+    php
+    sei
+
+    and #$0f
+    tax
+    lda #0
+    ror
+    sta midichannels + MIDIChannel::ext_enable,x
+
+    lda X16::Reg::ROMBank
+    pha
+    lda #$0a
+    sta X16::Reg::ROMBank
+
+    stx midichannel_iter
+    jsr release_channel_notes
+
+    ; send the current program if we're toggling external on
+    ldx midichannel_iter
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+    lda midichannels + MIDIChannel::instrument,x
+    jsr serial_send_progchange
+:
+
+    pla
+    sta X16::Reg::ROMBank
+
+    plp
+    rts
+.endproc
 
 .proc midi_restart: near
     ; We're resetting the instruments to $FF since we don't know
@@ -522,6 +595,14 @@ mloop:
     inx
     cpx #MIDI_CHANNELS
     bcc mloop
+
+    ldx #0
+    lda #$ff
+eloop:
+    sta vis_ext_ch,x
+    inx
+    cpx #EXT_POLY
+    bcc eloop
 
     jsr clear_lyrics
 
@@ -861,6 +942,13 @@ end:
 :   jsr AudioAPI::ym_release
     dec
     bne :-
+
+    lda #15
+    sta midichannel_iter
+extloop:
+    jsr release_channel_notes
+    dec midichannel_iter
+    bne extloop
 
     pla
     sta X16::Reg::ROMBank
@@ -1393,8 +1481,15 @@ end:
     jmp do_event_note_off
 :
 
-
     sty midizp ; stash Y until the end, we're done reading until the end of this routine
+
+    ldx midichannel_iter
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+
+    jsr serial_send_noteon
+    jmp end
+:
 
     ; ignore notes out of range of the YM2151
     lda note_iter
@@ -1712,6 +1807,14 @@ lyrloop:
     sta cur_velocity ; note volume
     sty midizp ; stash Y until the end, we're done reading until the end of this routine
 
+    ldx midichannel_iter
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+
+    jsr serial_send_noteoff
+    jmp end
+:
+
     ldx #0
 ymloop:
     lda ymchannels + YMChannel::midichannel,x
@@ -1775,19 +1878,34 @@ end:
 
     jsr fetch_indirect_byte
     ldx midichannel_iter
-
     sta midichannels + MIDIChannel::instrument,x
-    rts
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+    jmp serial_send_progchange
+:   rts
 .endproc
 
 .proc do_event_note_aft: near
-    jmp do_event_stub
+    and #$0F
+    sta midichannel_iter
+
+    tax
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+    jmp serial_send_note_aft
+:   jmp do_event_stub
 .endproc
 
 .proc do_event_controller: near
     and #$0F
     sta midichannel_iter
 
+    tax
+
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+    jmp serial_send_controller
+:
     jsr fetch_indirect_byte
     pha
     jsr fetch_indirect_byte
@@ -1954,6 +2072,15 @@ pan:
     bra @setpan
 
 all_notes_off:
+    jsr release_channel_notes   
+    jmp end
+.endproc
+
+; input: midichannel_iter = channel
+.proc release_channel_notes: near
+    php
+    sei
+
     ldx #0
 @anoloop:
     lda ymchannels + YMChannel::midichannel,x
@@ -1977,12 +2104,41 @@ all_notes_off:
     inx
     cpx #YM2151_CHANNELS
     bcc @anoloop    
-    
-    jmp end
+
+    ldx #0
+extloop:
+    lda vis_ext_ch,x
+    cmp midichannel_iter
+    bne extend
+
+    phx
+    lda #$ff
+    sta vis_ext_ch,x
+    lda vis_ext_note,x
+    sta note_iter
+    stz cur_velocity
+    jsr serial_send_noteoff
+    plx   
+extend:
+    inx
+    cpx #EXT_POLY
+    bcc extloop
+
+    plp
+
+    rts
 .endproc
 
+
 .proc do_event_ch_aft: near
-    jmp do_event_stub
+    and #$0F
+    sta midichannel_iter
+
+    tax
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+    jmp serial_send_ch_aft
+:   jmp do_event_stub
 .endproc
 
 ; A = PB value
@@ -2043,6 +2199,11 @@ pitch_bend:
     and #$0F
     sta midichannel_iter
 
+    tax
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+    jmp serial_send_pitchbend
+:
     jsr fetch_indirect_byte ; LSB
     rol
     rol
@@ -2146,3 +2307,214 @@ write_mod:
     MIDI_BORDER
     rts
 .endproc
+
+.proc midi_init: near
+    ; clear the visual indicators
+    ldx #EXT_POLY
+    lda #$ff
+:   sta vis_ext_ch-1,x
+    dex
+    bne :-
+
+    ; clear the external flags
+    ldx #MIDI_CHANNELS
+:   stz midichannels + MIDIChannel::ext_enable - 1,x
+    dex
+    bne :-
+
+    rts
+.endproc
+
+.proc serial_send_byte: near
+    pha
+    lda IOsTHR
+    cmp #$60
+    bcc plarts
+    lda #LSR_THRE
+    ldx #0
+:   dex
+    beq :+
+    bit $9f00
+IOsLSR = * - 2
+    beq :-
+:   pla
+    sta $9f00
+IOsTHR = * - 2
+    rts
+plarts:
+    pla
+    rts
+.endproc
+
+.proc midi_serial_init: near
+    php
+    sei
+
+    tax
+    beq :+ ; don't initialize the zero device
+
+    lda #LCR_DLAB
+    sta IO_BASE + sLCR, x
+
+    lda #<MIDI_SERIAL_DIVISOR
+    sta IO_BASE + sDLL, x
+
+    lda #>MIDI_SERIAL_DIVISOR
+    sta IO_BASE + sDLM, x
+
+    lda #LCR_WLS8
+    sta IO_BASE + sLCR, x
+
+    lda #(FCR_FIFOE | FCR_RFIFOR | FCR_XFIFOR)
+    sta IO_BASE + sFCR, x
+
+    lda #(MCR_DTR | MCR_RTS)
+    sta IO_BASE + sMCR, x
+
+:
+    txa
+    clc
+    adc sLSR
+    sta serial_send_byte::IOsLSR
+    txa
+    clc
+    adc sTHR
+    sta serial_send_byte::IOsTHR
+    
+    plp
+    rts
+.endproc
+
+.proc serial_send_noteoff: near
+    lda midichannel_iter
+    ora #$80
+    jsr serial_send_byte
+
+
+    ldx #0
+duploop:
+    lda vis_ext_ch,x
+    cmp midichannel_iter
+    bne dupend
+
+    lda vis_ext_note,x
+    cmp note_iter
+    bne dupend
+
+    lda #$ff
+    sta vis_ext_ch,x
+    bra found
+dupend:
+    inx
+    cpx #EXT_POLY
+    bcc duploop
+
+found:
+    lda note_iter
+    jsr serial_send_byte
+
+    lda cur_velocity
+    jmp serial_send_byte
+.endproc
+
+.proc serial_send_noteon: near
+    lda midichannel_iter
+    ora #$90
+    jsr serial_send_byte
+
+    ldx #0
+duploop:
+    lda vis_ext_ch,x
+    cmp midichannel_iter
+    bne dupend
+
+    lda vis_ext_note,x
+    cmp note_iter
+    beq found
+dupend:
+    inx
+    cpx #EXT_POLY
+    bcc duploop
+
+    ldx #0
+visloop:
+    lda vis_ext_ch,x
+    cmp #$ff
+    bne visend
+
+    lda midichannel_iter
+    sta vis_ext_ch,x
+    lda note_iter
+    sta vis_ext_note,x
+    bra found    
+visend:
+    inx
+    cpx #EXT_POLY
+    bcc visloop
+
+    lda note_iter
+found:
+    jsr serial_send_byte
+
+    lda cur_velocity
+    jmp serial_send_byte
+.endproc
+
+.proc serial_send_note_aft: near
+    lda midichannel_iter
+    ora #$a0
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jmp serial_send_byte
+.endproc
+
+.proc serial_send_controller: near
+    lda midichannel_iter
+    ora #$b0
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jmp serial_send_byte
+.endproc
+
+.proc serial_send_progchange: near
+    pha
+    lda midichannel_iter
+    ora #$c0
+    jsr serial_send_byte
+
+    pla
+    jmp serial_send_byte
+.endproc
+
+.proc serial_send_ch_aft: near
+    lda midichannel_iter
+    ora #$d0
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jmp serial_send_byte
+.endproc
+
+.proc serial_send_pitchbend: near
+    lda midichannel_iter
+    ora #$e0
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jsr serial_send_byte
+
+    jsr fetch_indirect_byte
+    jmp serial_send_byte
+.endproc
+
