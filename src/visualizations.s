@@ -2873,6 +2873,8 @@ rekey:
 	beq exit_menu
 	cmp #27 ; esc
 	beq exit_menu
+	cmp #$86 ; F3
+	beq exit_menu
 	cmp #$9d ; left arrow
 	beq dec_io
 	cmp #$1d ; right arrow
