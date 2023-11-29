@@ -948,7 +948,7 @@ end:
 extloop:
     jsr release_channel_notes
     dec midichannel_iter
-    bne extloop
+    bpl extloop
 
     pla
     sta X16::Reg::ROMBank
