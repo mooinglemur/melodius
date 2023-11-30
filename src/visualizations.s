@@ -57,7 +57,7 @@
 .export menu_options
 .export external_midi_io
 .export midi_ext_enable
-
+.export debug_byte
 
 .segment "BSS"
 
@@ -89,6 +89,8 @@ external_midi_io:
     .res 1
 midi_ext_enable:
 	.res 16
+debug_byte:
+	.res 1
 
 .segment "ZEROPAGE"
 visptr:
@@ -2833,6 +2835,18 @@ redraw:
 	lda #' '
 	jsr X16::Kernal::CHROUT
 	lda external_midi_io
+	jsr print_hex
+	lda #' '
+	jsr X16::Kernal::CHROUT
+	lda #'D'
+	jsr X16::Kernal::CHROUT
+	lda #'B'
+	jsr X16::Kernal::CHROUT
+	lda #'G'
+	jsr X16::Kernal::CHROUT
+	lda #' '
+	jsr X16::Kernal::CHROUT
+	lda debug_byte
 	jsr print_hex
 
     ldx #27

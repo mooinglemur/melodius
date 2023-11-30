@@ -33,6 +33,8 @@
 .import bcd_input
 .import bcd_result
 
+.import debug_byte
+
 .include "x16.inc"
 
 .scope AudioAPI
@@ -2333,17 +2335,25 @@ write_mod:
     lda #LSR_THRE
     ldx #0
 :   dex
-    beq :+
+    beq timeout
     bit $9f00
 IOsLSR = * - 2
     beq :-
-:   pla
+plasta:
+    pla
     sta $9f00
 IOsTHR = * - 2
     rts
+timeout:
+    lda IOsLSR
+    sta TO
+    lda $9f00
+TO = * - 2
+    sta debug_byte
 plarts:
     pla
     rts
+
 .endproc
 
 .proc midi_serial_init: near
@@ -2371,14 +2381,16 @@ plarts:
     lda #(MCR_DTR | MCR_RTS)
     sta IO_BASE + sMCR, x
 
+    ; disable interrupts
+    stz IO_BASE + sIER, x
 :
     txa
     clc
-    adc sLSR
+    adc #sLSR
     sta serial_send_byte::IOsLSR
     txa
     clc
-    adc sTHR
+    adc #sTHR
     sta serial_send_byte::IOsTHR
     
     plp
