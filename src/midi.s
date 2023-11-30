@@ -183,6 +183,8 @@ tracks_playing:
     .res 1
 lyrics:
     .res 32
+last_serial_cmd:
+    .res 1 ; to allow for continuations
 tmp1:
     .res 1 ; assumed free to use at all times but unsafe after jsr
 tmp2:
@@ -1464,6 +1466,82 @@ end:
     rts
 .endproc
 
+.proc do_event_note_off: near
+    and #$0F
+    sta midichannel_iter
+
+    jsr fetch_indirect_byte
+    sta note_iter ; note value
+    jsr fetch_indirect_byte
+    sta cur_velocity ; note volume
+from_on:
+    sty midizp ; stash Y until the end, we're done reading until the end of this routine
+
+    ldx midichannel_iter
+    bit midichannels + MIDIChannel::ext_enable,x
+    bpl :+
+
+    jsr serial_send_noteoff
+    jmp end
+:
+
+    ldx #0
+ymloop:
+    lda ymchannels + YMChannel::midichannel,x
+    cmp midichannel_iter
+    bne nextym
+
+    lda ymchannels + YMChannel::note,x
+    cmp note_iter
+    bne nextym
+
+    ldy midichannel_iter
+    lda midichannels + MIDIChannel::damper,y
+
+    beq nopedal
+    ; damper pedal is held down, sustain note
+    lda #1
+    sta ymchannels + YMChannel::undamped,x
+    bra end
+nopedal:
+    ; if it's a drum, don't actually release, except for certain notes
+    ; because many midi files have really short note times that make the
+    ; drums sound awful
+;    cpy #9
+;    bne release
+;    lda ymchannels + YMChannel::note,x
+;    cmp #25 ; drum roll
+;    beq release
+;    cmp #46 ; open hat
+;    beq release
+;    bra after_release
+release:
+    phx
+    ; release note
+    API_BORDER
+    txa
+    jsr AudioAPI::ym_release
+    MIDI_BORDER
+    plx
+after_release:
+    ; mark the note as released
+    stz ymchannels + YMChannel::note,x
+    stz ymchannels + YMChannel::callcnt,x
+
+
+    bra end
+
+
+nextym:
+    inx
+    cpx #YM2151_CHANNELS
+    bcc ymloop
+
+end:
+    ldy #0
+    rts
+.endproc
+
 
 .proc do_event_note_on: near
     and #$0F
@@ -1475,13 +1553,7 @@ end:
     sta cur_velocity ; note volume
 
     ora #0
-    bne :+
-    ; this is a note_off in disguise
-    jsr rewind_indirect_byte
-    jsr rewind_indirect_byte
-    lda midichannel_iter
-    jmp do_event_note_off
-:
+    beq do_event_note_off::from_on
 
     sty midizp ; stash Y until the end, we're done reading until the end of this routine
 
@@ -1799,81 +1871,6 @@ lyrloop:
     rts
 .endproc
 
-.proc do_event_note_off: near
-    and #$0F
-    sta midichannel_iter
-
-    jsr fetch_indirect_byte
-    sta note_iter ; note value
-    jsr fetch_indirect_byte
-    sta cur_velocity ; note volume
-    sty midizp ; stash Y until the end, we're done reading until the end of this routine
-
-    ldx midichannel_iter
-    bit midichannels + MIDIChannel::ext_enable,x
-    bpl :+
-
-    jsr serial_send_noteoff
-    jmp end
-:
-
-    ldx #0
-ymloop:
-    lda ymchannels + YMChannel::midichannel,x
-    cmp midichannel_iter
-    bne nextym
-
-    lda ymchannels + YMChannel::note,x
-    cmp note_iter
-    bne nextym
-
-    ldy midichannel_iter
-    lda midichannels + MIDIChannel::damper,y
-
-    beq nopedal
-    ; damper pedal is held down, sustain note
-    lda #1
-    sta ymchannels + YMChannel::undamped,x
-    bra end
-nopedal:
-    ; if it's a drum, don't actually release, except for certain notes
-    ; because many midi files have really short note times that make the
-    ; drums sound awful
-;    cpy #9
-;    bne release
-;    lda ymchannels + YMChannel::note,x
-;    cmp #25 ; drum roll
-;    beq release
-;    cmp #46 ; open hat
-;    beq release
-;    bra after_release
-release:
-    phx
-    ; release note
-    API_BORDER
-    txa
-    jsr AudioAPI::ym_release
-    MIDI_BORDER
-    plx
-after_release:
-    ; mark the note as released
-    stz ymchannels + YMChannel::note,x
-    stz ymchannels + YMChannel::callcnt,x
-
-
-    bra end
-
-
-nextym:
-    inx
-    cpx #YM2151_CHANNELS
-    bcc ymloop
-
-end:
-    ldy #0
-    rts
-.endproc
-
 .proc do_event_progchange: near
     and #$0F
     sta midichannel_iter
@@ -2126,6 +2123,25 @@ extend:
     cpx #EXT_POLY
     bcc extloop
 
+    ; set sostenuto/damper pedal off if external enabled
+    lda midichannels + MIDIChannel::ext_enable,x
+    beq end
+
+    lda midichannel_iter
+    ora #$b0 ; controller
+    jsr serial_send_byte
+    lda #$40
+    jsr serial_send_byte
+    lda #0
+    jsr serial_send_byte
+
+    ; send all notes off
+    lda #123
+    jsr serial_send_byte
+    lda #0
+    jsr serial_send_byte
+
+end:
     plp
 
     rts
@@ -2393,6 +2409,8 @@ plarts:
     adc #sTHR
     sta serial_send_byte::IOsTHR
     
+    stz last_serial_cmd
+
     plp
     rts
 .endproc
@@ -2400,9 +2418,19 @@ plarts:
 .proc serial_send_noteoff: near
     lda midichannel_iter
     ora #$80
+    ldx cur_velocity
+    beq make_on ; note off with vel 0 can be note on
+    cpx #$40    ; note off with vel 0x40 can also be note on vel 0
+    bne cont_off
+    stz cur_velocity
+make_on:
+    ora #$10
+cont_off:
+    cmp last_serial_cmd
+    sta last_serial_cmd
+    beq :+
     jsr serial_send_byte
-
-
+:   
     ldx #0
 duploop:
     lda vis_ext_ch,x
@@ -2432,8 +2460,11 @@ found:
 .proc serial_send_noteon: near
     lda midichannel_iter
     ora #$90
+    cmp last_serial_cmd
+    sta last_serial_cmd
+    beq :+
     jsr serial_send_byte
-
+:   
     ldx #0
 duploop:
     lda vis_ext_ch,x
@@ -2475,8 +2506,11 @@ found:
 .proc serial_send_note_aft: near
     lda midichannel_iter
     ora #$a0
+    cmp last_serial_cmd
+    sta last_serial_cmd
+    beq :+
     jsr serial_send_byte
-
+:   
     jsr fetch_indirect_byte
     jsr serial_send_byte
 
@@ -2487,8 +2521,11 @@ found:
 .proc serial_send_controller: near
     lda midichannel_iter
     ora #$b0
+    cmp last_serial_cmd
+    sta last_serial_cmd
+    beq :+
     jsr serial_send_byte
-
+:   
     jsr fetch_indirect_byte
     jsr serial_send_byte
 
@@ -2500,6 +2537,7 @@ found:
     pha
     lda midichannel_iter
     ora #$c0
+    sta last_serial_cmd
     jsr serial_send_byte
 
     pla
@@ -2509,6 +2547,7 @@ found:
 .proc serial_send_ch_aft: near
     lda midichannel_iter
     ora #$d0
+    sta last_serial_cmd
     jsr serial_send_byte
 
     jsr fetch_indirect_byte
@@ -2521,6 +2560,7 @@ found:
 .proc serial_send_pitchbend: near
     lda midichannel_iter
     ora #$e0
+    sta last_serial_cmd
     jsr serial_send_byte
 
     jsr fetch_indirect_byte
