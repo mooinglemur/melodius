@@ -676,7 +676,10 @@ donedir:
     ldx #8
     ldy #15
     jsr X16::Kernal::SETLFS
-    
+
+    lda #5 ; 5 = opening
+    jsr loading_msg
+
     jsr X16::Kernal::OPEN
 
     ldx #15
@@ -701,6 +704,8 @@ isfile:
     jeq wasmidi
     cmp #2
     jeq waszsm
+    cmp #3
+    jeq waszcm
 loadnewfile:
     lda is_lazy_loading
     beq :+
@@ -764,6 +769,9 @@ fn_done:
     
     jsr X16::Kernal::SETLFS
 
+    lda #5 ; 5 = opening
+    jsr loading_msg
+
     jsr X16::Kernal::OPEN
 
     ldx #2
@@ -774,6 +782,7 @@ fn_done:
     jsr loader::set_lfn
 
     jsr X16::Kernal::CHRIN
+    beq maybe_zcm
     cmp #'z'
     beq maybe_zsm
     cmp #'M'
@@ -789,6 +798,17 @@ err:
     lda #4 ; not recognized
     sta errornum
     rts
+maybe_zcm:
+    ; next two bytes must be zero
+    jsr loader::loadchr
+    jsr X16::Kernal::CHRIN
+    bne err
+    jsr loader::loadchr
+    jsr X16::Kernal::CHRIN
+    bne err
+    jsr loader::loadchr
+
+    jmp load_zcm
 maybe_midi:
     jsr loader::loadchr
     jsr X16::Kernal::CHRIN
@@ -1037,6 +1057,34 @@ load_midi:
 
     clc
     rts
+load_zcm:
+    jsr draw_zsm_viz
+
+    lda #0 ; 0 = loading, 1 = sorting, 2 = preloading pcm
+    jsr loading_msg
+
+    lda #3
+    sta playback_mode
+
+    jsr loader::load_remainder
+
+    lda #LOAD_BANK
+    sta X16::Reg::RAMBank
+
+    ldx #0
+    lda #<$a000
+    ldy #>$a000
+
+    jsr zsmkit::zcm_setmem
+
+    ldx #0
+    lda #8
+    jsr zsmkit::zcm_play
+
+    inc dir_needs_refresh
+
+    clc
+    rts
 wasmidi:
     jsr hide_sprites
     stz playback_mode
@@ -1048,6 +1096,10 @@ waszsm:
     ldx #0
     jsr zsmkit::zsm_close
     jsr clear_via_timer
+    jmp loadnewfile
+waszcm:
+    jsr hide_sprites
+    stz playback_mode
     jmp loadnewfile
 dotdot:
     .byte "..",0

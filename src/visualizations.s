@@ -29,7 +29,7 @@
 .import midi_set_external
 .import midi_serial_init
 .import midimeasure, midibeat, midi_tempo, midi_keysig, midi_mode
-.import vis_ext_ch, vis_ext_note
+.import vis_ext_ch, vis_ext_note, midipan
 .export update_instruments
 .export do_midi_sprites
 .export do_zsm_sprites
@@ -925,7 +925,7 @@ p4:
 preamble:
 	.byte $1c,$01,$05,0 ; red on white
 msg_idx:
-	.word loadn, sortn, preloadn, too_big, unrecognized
+	.word loadn, sortn, preloadn, too_big, unrecognized, opening
 loadn:
 	.byte "    LOADING     ",0
 sortn:
@@ -936,6 +936,8 @@ too_big:
 	.byte " FILE TOO LARGE ",0
 unrecognized:
 	.byte "UNKNOWN FILETYPE",0
+opening:
+	.byte "    OPENING     ",0
 .endproc
 
 
@@ -1595,13 +1597,74 @@ ext:
 	; now we do external MIDI sprites
 	stz iterator
 ext_loop:
+	stz tmp1
+	stz tmp2
+	stz pitchdown
+	stz panright
+
 	ldx iterator
 	lda vis_ext_ch,x
-	bmi ext_hideit
+	tay
+	jmi ext_hideit
 
-	; address 0 contains the external sprite for now
-	stz Vera::Reg::Data0
-	stz Vera::Reg::Data0
+	lda vis_ext_note,x
+	cmp #12
+	jcc ext_hideit
+	cmp #109
+	jcs ext_hideit
+
+	cpy #9
+	beq ext_endbend ; channel 10, don't pan or pitch
+ext_chkpan:
+	lda midipan,y
+	cmp #3
+	beq ext_chkpitch
+
+	cmp #1
+	beq :+
+	inc panright
+:
+	lda tmp1
+	clc
+	adc #64
+	sta tmp1
+	lda #0
+	adc #0
+	sta tmp2
+
+ext_chkpitch:
+	lda midibend,y
+	beq ext_endbend
+	bpl ext_contbend
+
+	ldy #2
+	sty pitchdown
+
+	cmp #$C0
+	bcc ext_hardbend
+	bra ext_softbend
+
+ext_contbend:
+	cmp #$40
+	bcs ext_hardbend
+ext_softbend:
+	lda tmp1
+	clc
+	adc #128
+	sta tmp1
+	lda #0
+	adc #0
+	sta tmp2
+	bra ext_endbend
+ext_hardbend:
+	inc tmp2
+ext_endbend:
+	lda tmp1
+	sta Vera::Reg::Data0
+
+	; no high bits, mode 0
+	lda tmp2
+	sta Vera::Reg::Data0
 
 	; multiply MIDI channel by 16
 	lda vis_ext_ch,x
@@ -1635,6 +1698,8 @@ ext_loop:
 
 	; set the Z depth / flip
 	lda #$0C
+	ora pitchdown
+	ora panright
 	sta Vera::Reg::Data0
 
 	; get channel volume (attenuation)
@@ -2239,10 +2304,11 @@ wav2color:
 	lda #$10 ; auto increment = 1
 	sta Vera::Reg::AddrH
 
-	; First sprite is gonna be for the "note blocked" sprite
+	; First sprite is gonna be for the "external" sprite
 	ldx #0
 :
-	lda note_blocked,x
+	lda note,x
+	and note_external_mask,x
 	sta Vera::Reg::Data0
 	inx
 	bpl :- ; 128 of them
@@ -2268,10 +2334,11 @@ noteloop:
 	bne noteloop
 
 
-; blank sprite
+; external sprite
 	ldx #0
 :
-	lda note_blocked,x
+	lda note_arrow,x
+	and note_external_mask,x
 	sta Vera::Reg::Data0
 	inx
 	bpl :- ; 128 of them
@@ -2302,10 +2369,11 @@ notearrowloop:
 	sta Vera::Reg::DCVideo
 
 
-; blank sprite
+; external sprite
 	ldx #0
 :
-	lda note_blocked,x
+	lda bend_1,x
+	and note_external_mask,x
 	sta Vera::Reg::Data0
 	inx
 	bpl :- ; 128 of them
@@ -2335,7 +2403,8 @@ bendloop1:
 ; blank sprite
 	ldx #0
 :
-	lda note_blocked,x
+	lda bend_1_arrow,x
+	and note_external_mask,x
 	sta Vera::Reg::Data0
 	inx
 	bpl :- ; 128 of them
@@ -2360,10 +2429,11 @@ bendloop1arrow:
 	bne bendloop1arrow
 
 
-; blank sprite
+; external sprite
 	ldx #0
 :
-	lda note_blocked,x
+	lda bend_2,x
+	and note_external_mask,x
 	sta Vera::Reg::Data0
 	inx
 	bpl :- ; 128 of them
@@ -2388,10 +2458,11 @@ bendloop2:
 	bne bendloop2
 
 
-; blank sprite
+; external sprite
 	ldx #0
 :
-	lda note_blocked,x
+	lda bend_2_arrow,x
+	and note_external_mask,x
 	sta Vera::Reg::Data0
 	inx
 	bpl :- ; 128 of them
@@ -2535,24 +2606,23 @@ note_arrow:
 	.byte $00,$00,$00,$00,$00,$00,$00,$00
 	.byte $00,$00,$00,$00,$00,$00,$00,$00
 
-
-note_blocked: ; repurposed for external midi
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
+note_external_mask: 
 	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
 	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
-	.byte $00,$00,$00,$00,$00,$00,$00,$00
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
+	.byte $1c,$cc,$dd,$dd,$dd,$dd,$cc,$c1
 
 .endproc
 
@@ -2794,7 +2864,7 @@ rpt:
 	lda #$05
 	jsr X16::Kernal::CHROUT
 
-	ldy #10
+	ldy #13
 boxloop:
 	phy
 	ldx #0
@@ -2823,46 +2893,64 @@ redraw:
 	lda #$05
 	jsr X16::Kernal::CHROUT
 
+	stz X16::Reg::ROMBank
+
     ldx #26
-    ldy #13
+    ldy #35
 	clc
     jsr X16::Kernal::PLOT
 
-	lda #'I'
-	jsr X16::Kernal::CHROUT
-	lda #'O'
-	jsr X16::Kernal::CHROUT
-	lda #' '
-	jsr X16::Kernal::CHROUT
+	jsr X16::Kernal::PRIMM
+	.byte "MIDI menu",0
+
+    ldx #28
+    ldy #20
+	clc
+    jsr X16::Kernal::PLOT
+
+	lda external_midi_io
+	bne ioenab
+
+	jsr X16::Kernal::PRIMM
+	.byte "External MIDI DISABLED (use L/R arrows)",0
+	bra iocont
+ioenab:
+	jsr X16::Kernal::PRIMM
+	.byte "  External MIDI serial I/O base $9F",0
+
 	lda external_midi_io
 	jsr print_hex
-	lda #' '
-	jsr X16::Kernal::CHROUT
-	lda #'D'
-	jsr X16::Kernal::CHROUT
-	lda #'B'
-	jsr X16::Kernal::CHROUT
-	lda #'G'
-	jsr X16::Kernal::CHROUT
-	lda #' '
-	jsr X16::Kernal::CHROUT
+
+	jsr X16::Kernal::PRIMM
+	.byte "   ",0
+
+iocont:
+.if 0
+	jsr X16::Kernal::PRIMM
+	.byte "      DEBUG BYTE: ",0
+
 	lda debug_byte
 	jsr print_hex
+.endif
 
-    ldx #27
-    ldy #13
+    ldx #30
+    ldy #15
 	clc
     jsr X16::Kernal::PLOT
 
-	lda #'C'
-	jsr X16::Kernal::CHROUT
-	lda #'H'
-	jsr X16::Kernal::CHROUT
-	lda #' '
-	jsr X16::Kernal::CHROUT
+	jsr X16::Kernal::PRIMM
+	.byte "Per-channel routing (",$9e,"YELLOW",$05,"=YM2151, ",$96,"RED",$05,"=external)",0
+
+    ldx #31
+    ldy #14
+	clc
+    jsr X16::Kernal::PLOT
+
+	jsr X16::Kernal::PRIMM
+	.byte "CH  ",0
 	ldx #0
 chloop:
-	lda #$05
+	lda #$9e
 	bit midi_ext_enable,x
 	bpl :+
 	lda #$96
@@ -2881,18 +2969,49 @@ chloop:
 	cpx #16
 	bcc chloop
 
+    ldx #33
+    ldy #13
+	clc
+    jsr X16::Kernal::PLOT
+	jsr X16::Kernal::PRIMM
+	.byte $95,$01,$05,"KEYS: [SPACE] toggle all / [1]-[9] toggle channel 1-9",0
+
+    ldx #34
+    ldy #14
+	clc
+    jsr X16::Kernal::PLOT
+	jsr X16::Kernal::PRIMM
+	.byte "[0] toggle channel 10 / [A]-[F] toggle channel 11-16",0
+
+    ldx #35
+    ldy #18
+	clc
+    jsr X16::Kernal::PLOT
+	jsr X16::Kernal::PRIMM
+	.byte "[LEFT/RIGHT] Adjust I/O base for MIDI card",0
+
+    ldx #36
+    ldy #17
+	clc
+    jsr X16::Kernal::PLOT
+	jsr X16::Kernal::PRIMM
+	.byte "[RETURN/ESC/F3] Apply I/O base and exit menu",0
+
+
 rekey:
 	jsr X16::Kernal::GETIN
 	cmp #13 ; enter
-	beq exit_menu
+	jeq exit_menu
 	cmp #27 ; esc
-	beq exit_menu
+	jeq exit_menu
 	cmp #$86 ; F3
-	beq exit_menu
+	jeq exit_menu
 	cmp #$9d ; left arrow
 	beq dec_io
 	cmp #$1d ; right arrow
 	beq inc_io
+	cmp #$20 ; space
+	beq midi_all_toggle
 	cmp #$30
 	bcc rekey
 	cmp #$3a
@@ -2942,6 +3061,22 @@ tryinc:
 	jcs redraw
 	adc #$08
 	sta external_midi_io
+	jmp redraw
+midi_all_toggle:
+	ldx #0
+	lda #$80
+	eor midi_ext_enable,x
+:	sta midi_ext_enable,x
+	pha
+	phx
+	asl
+	txa
+	jsr midi_set_external
+	plx
+	pla
+	inx
+	cpx #16
+	bne :-
 	jmp redraw
 
 exit_menu:

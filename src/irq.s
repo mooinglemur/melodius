@@ -100,6 +100,8 @@ handler:
     beq @midi
     cmp #2
     beq @zsm
+    cmp #3
+    beq @zcm
     bra @end
 
 @midi:
@@ -115,7 +117,6 @@ handler:
 
     lda via_timer_loops
     sta via_timer_iter
-
     lda #2
     jsr zsmkit::zsm_tick
 @vend:
@@ -132,6 +133,7 @@ handler:
     plx
     pla
     rti
+@zcm:
 @zsm:
     lda use_via_timer ; conveniently matches the input to zsm_tick
     jsr zsmkit::zsm_tick

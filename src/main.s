@@ -218,6 +218,8 @@ tabkey:
 	beq rekey
 	cmp #1
 	beq tabkey
+	cmp #3
+	beq tabkey
 	inc stopping
 	bra rekey
 :	
@@ -269,6 +271,8 @@ tabkey:
 	jeq stopmidi
 	cmp #2
 	jeq stopzsm
+	cmp #3
+	jeq stopzcm
 	jmp rekey
 :
 
@@ -279,6 +283,8 @@ tabkey:
 	jeq pausemidi
 	cmp #2
 	jeq pausezsm
+	cmp #3
+	jeq stopzcm
 	jmp rekey
 :
 
@@ -313,6 +319,8 @@ endkey:
 	beq ismidi
 	cmp #2
 	beq iszsm
+	cmp #3
+	beq iszcm
 	jmp continue
 ismidi:
 	jsr do_midi_sprites
@@ -330,7 +338,7 @@ ismidi:
 	jsr loadrandom
 	jcc continue
 :	jsr loadnext
-	bcc continue
+	jcc continue
 stopmidi:
 
 	jsr midi_stop
@@ -357,7 +365,15 @@ doatten:
 	ldx #0
 	jsr zsmkit::zsm_setatten
 	bra zsmck
-
+iszcm:
+	jsr do_zsm_sprites
+	lda zsmkit::pcm_busy
+	bne continue
+	jsr hide_sprites
+	bra songstopped
+stopzcm:
+	jsr zsmkit::zcm_stop
+	bra continue
 loopck:
 	lda jukebox
 	beq zsmck

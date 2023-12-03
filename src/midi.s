@@ -17,7 +17,7 @@
 .export vis_ext_ch, vis_ext_note
 
 .export midibeat, midimeasure, midi_timesig_numerator, midi_timesig_denominator
-.export midi_tempo, midi_keysig, midi_mode
+.export midi_tempo, midi_keysig, midi_mode, midipan
 
 .import divide40_24
 .import multiply16x16
@@ -201,6 +201,7 @@ ymmidi := ymchannels + YMChannel::midichannel
 ympan := ymchannels + YMChannel::pan
 ymatten := ymchannels + YMChannel::atten
 midibend := midichannels + MIDIChannel::pitchbend
+midipan := midichannels + MIDIChannel::pan
 midiinst := midichannels + MIDIChannel::instrument
 midibeat := midistate + MIDIState::beat_bcd
 midimeasure := midistate + MIDIState::measure
@@ -549,12 +550,13 @@ error:
     stx midichannel_iter
     jsr release_channel_notes
 
-    ; send the current program if we're toggling external on
+    ; send the current program and pb range if we're toggling external on
     ldx midichannel_iter
     bit midichannels + MIDIChannel::ext_enable,x
     bpl :+
     lda midichannels + MIDIChannel::instrument,x
     jsr serial_send_progchange
+    jsr serial_apply_pbrange
 :
 
     pla
@@ -562,6 +564,26 @@ error:
 
     plp
     rts
+.endproc
+
+.proc serial_apply_pbrange: near
+    lda midichannel_iter
+    ora #$b0 ; controller
+    sta last_serial_cmd
+    jsr serial_send_byte
+    lda #$64
+    jsr serial_send_byte
+    lda #$00
+    jsr serial_send_byte
+    lda #$65
+    jsr serial_send_byte
+    lda #$00
+    jsr serial_send_byte
+    lda #$06
+    jsr serial_send_byte
+    ldx midichannel_iter
+    lda midichannels + MIDIChannel::pbdepth,x
+    jmp serial_send_byte
 .endproc
 
 .proc midi_restart: near
@@ -595,6 +617,49 @@ mloop:
     sta midichannels + MIDIChannel::pan,x
     lda #2 
     sta midichannels + MIDIChannel::pbdepth,x
+
+    lda midichannels + MIDIChannel::ext_enable,x
+    beq mcont
+
+    stx midichannel_iter
+
+    txa
+    ora #$b0 ; controller
+    sta last_serial_cmd
+    jsr serial_send_byte
+
+    ; send all notes off
+    lda #123
+    jsr serial_send_byte
+    lda #0
+    jsr serial_send_byte
+
+    ; send reset all controllers
+    lda #121
+    jsr serial_send_byte
+    lda #0
+    jsr serial_send_byte
+
+    ; send bank 0
+    lda #0
+    jsr serial_send_byte
+    lda #0
+    jsr serial_send_byte
+
+    lda #$20
+    jsr serial_send_byte
+    lda #0
+    jsr serial_send_byte
+
+    ; reset program to 0 (as needed after a bank change)
+    lda #0
+    jsr serial_send_progchange
+
+    ; reset to default PB range
+    jsr serial_apply_pbrange
+
+    ldx midichannel_iter
+mcont:
 
     inx
     cpx #MIDI_CHANNELS
@@ -1903,7 +1968,9 @@ lyrloop:
 
     bit midichannels + MIDIChannel::ext_enable,x
     bpl :+
-    jmp serial_send_controller
+    jsr serial_send_controller
+    jsr rewind_indirect_byte
+    jsr rewind_indirect_byte
 :
     jsr fetch_indirect_byte
     pha
@@ -2123,20 +2190,22 @@ extend:
     cpx #EXT_POLY
     bcc extloop
 
-    ; set sostenuto/damper pedal off if external enabled
     lda midichannels + MIDIChannel::ext_enable,x
     beq end
 
     lda midichannel_iter
     ora #$b0 ; controller
-    jsr serial_send_byte
-    lda #$40
-    jsr serial_send_byte
-    lda #0
+    sta last_serial_cmd
     jsr serial_send_byte
 
     ; send all notes off
     lda #123
+    jsr serial_send_byte
+    lda #0
+    jsr serial_send_byte
+
+    ; send damper off
+    lda #$40
     jsr serial_send_byte
     lda #0
     jsr serial_send_byte
@@ -2563,10 +2632,27 @@ found:
     sta last_serial_cmd
     jsr serial_send_byte
 
-    jsr fetch_indirect_byte
+    jsr fetch_indirect_byte ; LSB
+
+    tax
+    rol
+    rol
+    and #$01
+    sta tmp1
+    txa
+
     jsr serial_send_byte
 
-    jsr fetch_indirect_byte
+    jsr fetch_indirect_byte ; MSB
+    pha
+    asl
+    ora tmp1
+    sec
+    sbc #$80
+    ldx midichannel_iter
+    sta midichannels + MIDIChannel::pitchbend,x
+    pla
+
     jmp serial_send_byte
 .endproc
 
