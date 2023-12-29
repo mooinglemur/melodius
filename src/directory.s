@@ -1706,7 +1706,6 @@ name_check:
     inc dptr+1
 :   inx
     bne name_check
-name_notfound:
     rts
 name_found:
     txa
@@ -1723,20 +1722,18 @@ name_found:
     rts
 name_next:
     lda (dptr)
-    beq name_next_null
+    beq name_next_eol
+    inc dptr
+    bne name_next
+    inc dptr+1
+    bra name_next
+name_next_eol:
     inc dptr
     bne :+
     inc dptr+1
 :   lda (dptr)
-    bne name_next
-name_next_null:
-    ldy #1
-    lda (dptr),y
-    beq name_notfound
-    inc dptr
-    bne :+
-    inc dptr+1
-:   bra name_new_row
+    bne name_new_row
+    rts
 
 dirfn:
     .byte "$=T:=D"
