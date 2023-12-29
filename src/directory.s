@@ -1722,11 +1722,14 @@ name_found:
     sta cvis+1
     rts
 name_next:
+    lda (dptr)
+    beq name_next_null
     inc dptr
     bne :+
     inc dptr+1
 :   lda (dptr)
     bne name_next
+name_next_null:
     ldy #1
     lda (dptr),y
     beq name_notfound
