@@ -22,3 +22,24 @@
     lda #0
     sta Vera::Reg::DCBorder
 .endmacro
+
+.macro WAITVSYNC frames
+.local endless
+.local FRC
+	jsr X16::Kernal::RDTIM
+.ifnblank frames
+	clc
+	adc #frames
+.endif
+	sta FRC
+endless:
+	wai
+	jsr X16::Kernal::RDTIM
+	cmp #$ff
+FRC = * -1
+.ifnblank frames
+	bne endless
+.else
+	beq endless
+.endif
+.endmacro

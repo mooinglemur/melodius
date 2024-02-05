@@ -27,6 +27,7 @@ paused:
 
 .import register_handler
 .import deregister_handler
+.import measure_machine_speed
 .import midi_parse
 .import midi_play
 .import midi_stop
@@ -138,6 +139,7 @@ noskinny:
 	ldy #>zsm_callback
 	jsr zsmkit::zsm_setcb
 
+	jsr measure_machine_speed
 	jsr register_handler
 
 	jsr midi_init

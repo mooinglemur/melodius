@@ -3,6 +3,7 @@
 
 .export register_handler
 .export deregister_handler
+.export measure_machine_speed
 
 .export use_via_timer
 .export via_timer_loops
@@ -25,6 +26,8 @@ via_timer_iter:
     .res 1
 via_timer_latch:
     .res 2
+machine_speed:
+    .res 3
 .segment "CODE"
 
 .scope zsmkit
@@ -154,6 +157,113 @@ handler:
     jmp (old_irq_handler)
 
 
+.proc measure_machine_speed: near
+	WAITVSYNC
+	; grab the least significant byte of the timer
+	jsr X16::Kernal::RDTIM
+	sta delta1
+
+	lda #5
+	ldx #0
+	ldy #0
+busyloop:
+	dey
+	bne busyloop
+	dex
+	bne busyloop
+	dec
+	bne busyloop
+
+.assert (<busyloop) < 246, error, "measure_machine_speed busyloop crosses a page boundary within the loop, it must be moved"
+
+	jsr X16::Kernal::RDTIM
+	sec
+	sbc delta1
+
+	cmp #8
+	bcc mhz14
+	cmp #9
+	bcc mhz12
+	cmp #12
+	bcc mhz10
+	cmp #14
+	bcc mhz8
+	cmp #18
+	bcc mhz6
+	cmp #28
+	bcc mhz4
+	cmp #56
+	bcc mhz2
+
+mhz1:
+	lda #<1000000
+	sta machine_speed
+	lda #>1000000
+	sta machine_speed+1
+	lda #^1000000
+	sta machine_speed+2
+	rts
+mhz14:
+	lda #<14000000
+	sta machine_speed
+	lda #>14000000
+	sta machine_speed+1
+	lda #^14000000
+	sta machine_speed+2
+	rts
+mhz12:
+	lda #<12000000
+	sta machine_speed
+	lda #>12000000
+	sta machine_speed+1
+	lda #^12000000
+	sta machine_speed+2
+	rts
+mhz10:
+	lda #<10000000
+	sta machine_speed
+	lda #>10000000
+	sta machine_speed+1
+	lda #^10000000
+	sta machine_speed+2
+	rts
+mhz8:
+	lda #<8000000
+	sta machine_speed
+	lda #>8000000
+	sta machine_speed+1
+	lda #^8000000
+	sta machine_speed+2
+	rts
+mhz6:
+	lda #<6000000
+	sta machine_speed
+	lda #>6000000
+	sta machine_speed+1
+	lda #^6000000
+	sta machine_speed+2
+	rts
+mhz4:
+	lda #<4000000
+	sta machine_speed
+	lda #>4000000
+	sta machine_speed+1
+	lda #^4000000
+	sta machine_speed+2
+	rts
+mhz2:
+	lda #<2000000
+	sta machine_speed
+	lda #>2000000
+	sta machine_speed+1
+	lda #^2000000
+	sta machine_speed+2
+	rts
+delta1:
+	.byte 0
+.endproc
+
+
 ; .A = Hz
 .proc setup_via_timer: near
     ; tmp1 = remainder
@@ -166,11 +276,11 @@ handler:
 	stz tmp1
 	stz tmp1+1
 	
-    lda #<8000000
+    lda machine_speed
 	sta tmp2
-	lda #>8000000
+	lda machine_speed+1
 	sta tmp2+1
-	lda #^8000000
+	lda machine_speed+2
 	sta tmp2+2
 
 	; initialize divisor to int_rate (default 60)

@@ -1735,6 +1735,8 @@ name_next_eol:
     bne name_new_row
     rts
 
+; these filenames are the most compatible and should work with R44+
+; including HostFS, even though they needlessly include datetime
 dirfn:
     .byte "$=T:=D"
 filefn:
