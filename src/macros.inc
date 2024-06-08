@@ -1,3 +1,8 @@
+.ifndef macros_inc
+macros_inc = 1
+
+.include "x16.inc"
+
 .macro MIDI_BORDER
     lda #15
     sta Vera::Reg::DCBorder
@@ -43,3 +48,5 @@ FRC = * -1
 	beq endless
 .endif
 .endmacro
+
+.endif

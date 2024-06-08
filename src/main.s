@@ -15,6 +15,12 @@ playback_mode:
 	.res 1
 paused:
 	.res 1
+controller_hold:
+	.res 1
+controller_last:
+	.res 2
+controller_edge:
+	.res 2
 .segment "CODE"
 
 .include "x16.inc"
@@ -33,6 +39,7 @@ paused:
 .import midi_stop
 .import midi_restart
 .import midi_is_playing
+.import midi_playtick
 
 .import midi_init
 .import midi_serial_init
@@ -130,6 +137,15 @@ noskinny:
 
 	stz stopping
 
+	stz controller_last
+	stz controller_last+1
+
+	stz controller_edge
+	stz controller_edge+1
+
+	stz controller_hold
+
+
 	lda #1
 	sta X16::Reg::RAMBank
 	jsr zsmkit::zsm_init_engine
@@ -163,145 +179,89 @@ FRC = * -1
 
 rekey:
 	jsr X16::Kernal::GETIN
-	jeq endkey
+	beq check_controller
 
-	cmp #$85 ; F1
-	bne :++
-	inc jukebox
-	lda jukebox
-	cmp #3
-	bcc :+
-	lda #0
-:	sta jukebox
-	jsr legend_jukebox
-	bra rekey
-:
+	ldx #(keytab_end-keytab)
+keyloop:
+	cmp keytab-1,x
+	beq keymatch
+	dex
+	bne keyloop
+	bra endkey
 
-	cmp #$89 ; F2
-	bne :++
-	inc ticker_behavior
-	lda ticker_behavior
-	cmp #3
-	bcc :+
-	lda #0
-:	sta ticker_behavior
-	jsr legend_jukebox
-	lda playback_mode
-	cmp #2
-	bne rekey
-	jsr apply_ticker_behavior
-	bra rekey
-:
+keymatch:
+	dex
+	txa
+	asl
+	tax
+	jmp (keyopertab,x)
 
-	cmp #$86 ; F3
-	bne :+
-	jsr menu_options
-	bra rekey
-:
-
-	cmp #$09 ; tab
-	bne :++
-	lda playback_mode
-	beq rekey
-tabkey:
-	lda jukebox
-	cmp #2
-	beq :+
-	jsr loadnext
-	jmp continue
-:
-	jsr loadrandom
-	jmp continue
-:
-
-	cmp #$18 ; shift-tab
-	bne :+
-	lda playback_mode
-	beq rekey
-	cmp #1
-	beq tabkey
-	cmp #3
-	beq tabkey
-	inc stopping
-	bra rekey
-:	
-
-	cmp #$91 ; up arrow
-	bne :+
+check_controller:
 	lda #1
-	jsr dirlist_nav_up
-	jmp rekey
-:
+	jsr X16::Kernal::JOYSTICK_GET
+	cpy #$ff ; no controller plugged in
+	beq endkey
+	eor #$ff
+	tay
+	eor controller_last
+	sta controller_edge
+	txa
+	eor #$ff
+	tax
+	eor controller_last+1
+	sta controller_edge+1
+	sty controller_last
+	stx controller_last+1
+	ora controller_edge
+	beq held
 
-	cmp #$11 ; down arrow
-	bne :+
-	lda #1
-	jsr dirlist_nav_down
-	jmp rekey
-:
+	lda #30
+controller_repeat:
+	sta controller_hold
 
-	cmp #$82 ; pgup
-	bne :+
-	lda files_full_size
-	jsr dirlist_nav_up
-	jmp rekey
-:
+	lda controller_last
+	ldx #(joytab_end-joytab)
+joy_a_loop:
+	cmp joytab-1,x
+	beq joy_a_match
+	dex
+	bne joy_a_loop
 
-	cmp #$02 ; pgdn
-	bne :+
-	lda files_full_size
-	jsr dirlist_nav_down
-	jmp rekey
-:
+	lda controller_last+1
+	ldx #(joytab_end-joytab)
+joy_x_loop:
+	cmp joytab-1,x
+	beq joy_x_match
+	dex
+	bne joy_x_loop
 
-	cmp #$13 ; home
-	bne :+
-	jsr dirlist_nav_home
-	jmp rekey
-:
+	bra endkey
 
-	cmp #$04 ; end
-	bne :+
-	jsr dirlist_nav_end
-	jmp rekey
-:
+joy_a_match:
+	dex
+	txa
+	asl
+	tax
+	jmp (joyopertab_a,x)
 
-	cmp #$a0 ; shift+space
-	bne :+
-	lda playback_mode
-	cmp #1
-	jeq stopmidi
-	cmp #2
-	jeq stopzsm
-	cmp #3
-	jeq stopzcm
-	jmp rekey
-:
+joy_x_match:
+	dex
+	txa
+	asl
+	tax
+	jmp (joyopertab_x,x)
 
-	cmp #$20 ; space
-	bne :+
-	lda playback_mode
-	cmp #1
-	jeq pausemidi
-	cmp #2
-	jeq pausezsm
-	cmp #3
-	jeq stopzcm
-	jmp rekey
-:
+held:
+	lda controller_hold
+	dec
+	bpl not_held
+	cmp #$fe
+	bcs not_held
+	lda #0
+	bra controller_repeat
+not_held:
+	sta controller_hold
 
-	cmp #$0d
-	bne :+
-	jsr dirlist_exec
-	jcs songstopped
-	jmp rekey
-:
-
-	cmp #$1d ; right arrow
-	bne :+
-	jsr select_playing_song
-	jmp rekey
-:
 endkey:
 	lda dir_needs_refresh
 	beq :+
@@ -493,3 +453,236 @@ flashpause:
 @zsm:
 	jsr flash_pause_zsm
 	jmp continue
+
+keytab:
+	.byte $60 ; Backtick
+	.byte $85 ; F1
+	.byte $89 ; F2
+	.byte $86 ; F3
+	.byte $09 ; Tab
+	.byte $18 ; Shift+Tab
+	.byte $91 ; Up Arrow
+	.byte $11 ; Down Arrow
+	.byte $82 ; PgUp
+	.byte $02 ; PgDn
+	.byte $13 ; Home
+	.byte $04 ; End
+	.byte $a0 ; Shift+Space
+	.byte $20 ; Space
+	.byte $0d ; Return
+	.byte $1d ; Right Arrow
+keytab_end:
+
+joytab:
+	.byte $01 ; Right
+	.byte $02 ; Left
+	.byte $04 ; Down
+	.byte $08 ; Up
+	.byte $10 ; Start / R
+	.byte $20 ; Select / L
+	.byte $40 ; Y / X
+	.byte $80 ; B / A
+joytab_end:
+
+joyopertab_a:
+	.word RIGHTARROW_func
+	.word endkey
+	.word DOWNARROW_func
+	.word UPARROW_func
+	.word SPACE_func
+	.word F1_func
+	.word TAB_func
+	.word RETURN_func
+
+joyopertab_x:
+	.word endkey
+	.word endkey
+	.word endkey
+	.word endkey
+	.word PGDN_func
+	.word PGUP_func
+	.word SH_TAB_func
+	.word SH_SPACE_func
+
+keyopertab:
+	.word BACKTICK_func
+	.word F1_func
+	.word F2_func
+	.word F3_func
+	.word TAB_func
+	.word SH_TAB_func
+	.word UPARROW_func
+	.word DOWNARROW_func
+	.word PGUP_func
+	.word PGDN_func
+	.word HOME_func
+	.word END_func
+	.word SH_SPACE_func
+	.word SPACE_func
+	.word RETURN_func
+	.word RIGHTARROW_func
+
+F1_func:
+	inc jukebox
+	lda jukebox
+	cmp #3
+	bcc :+
+	lda #0
+:	sta jukebox
+	jsr legend_jukebox
+	jmp rekey
+
+F2_func:
+	inc ticker_behavior
+	lda ticker_behavior
+	cmp #3
+	bcc :+
+	lda #0
+:	sta ticker_behavior
+	jsr legend_jukebox
+	lda playback_mode
+	cmp #2
+	jne rekey
+	jsr apply_ticker_behavior
+	jmp rekey
+
+F3_func:
+	jsr menu_options
+	jmp rekey
+
+TAB_func:
+	lda playback_mode
+	jeq rekey
+tabkey:
+	lda jukebox
+	cmp #2
+	beq :+
+	jsr loadnext
+	jmp continue
+:
+	jsr loadrandom
+	jmp continue
+
+SH_TAB_func:
+	lda playback_mode
+	jeq rekey
+	cmp #1
+	beq tabkey
+	cmp #3
+	beq tabkey
+	inc stopping
+	jmp rekey
+
+UPARROW_func:
+	lda #1
+	jsr dirlist_nav_up
+	jmp rekey
+
+DOWNARROW_func:
+	lda #1
+	jsr dirlist_nav_down
+	jmp rekey
+
+PGUP_func:
+	lda files_full_size
+	jsr dirlist_nav_up
+	jmp rekey
+
+PGDN_func:
+	lda files_full_size
+	jsr dirlist_nav_down
+	jmp rekey
+
+HOME_func:
+	jsr dirlist_nav_home
+	jmp rekey
+
+END_func:
+	jsr dirlist_nav_end
+	jmp rekey
+
+SH_SPACE_func:
+	lda playback_mode
+	cmp #1
+	jeq stopmidi
+	cmp #2
+	jeq stopzsm
+	cmp #3
+	jeq stopzcm
+	jmp rekey
+
+SPACE_func:
+	lda playback_mode
+	cmp #1
+	jeq pausemidi
+	cmp #2
+	jeq pausezsm
+	cmp #3
+	jeq stopzcm
+	jmp rekey
+
+RETURN_func:
+	jsr dirlist_exec
+	jcs songstopped
+	jmp rekey
+
+RIGHTARROW_func:
+	jsr select_playing_song
+	jmp rekey
+
+BACKTICK_func:
+	lda playback_mode
+	cmp #1
+	beq ff_midi
+	cmp #2
+	beq ff_zsm
+	jmp rekey
+ff_midi:
+	lda X16::Reg::ROMBank
+	pha
+	lda #$0A
+	sta X16::Reg::ROMBank
+	lda X16::Reg::RAMBank
+	pha
+
+	ldx #0
+ff_midi_loop:
+	phx
+	sei
+	jsr midi_playtick
+	plx
+	cli
+	dex
+	bne ff_midi_loop
+
+	pla
+	sta X16::Reg::RAMBank
+	pla
+	sta X16::Reg::ROMBank
+
+	jmp rekey
+ff_zsm:
+	lda X16::Reg::ROMBank
+	pha
+	lda #$0A
+	sta X16::Reg::ROMBank
+	lda X16::Reg::RAMBank
+	pha
+
+	ldx #0
+ff_zsm_loop:
+	phx
+	sei
+	lda #2
+	jsr zsmkit::zsm_tick
+	plx
+	cli
+	dex
+	bne ff_zsm_loop
+
+	pla
+	sta X16::Reg::RAMBank
+	pla
+	sta X16::Reg::ROMBank
+
+	jmp rekey

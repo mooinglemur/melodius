@@ -49,7 +49,7 @@
 .define EXT_POLY 32
 
 .define IO_BASE $9F00
-.define MIDI_SERIAL_DIVISOR 37
+.define MIDI_SERIAL_DIVISOR 32
 
 ; Define the registers of the TL16C2550PFBR
 .define sRHR 0 ; Receive Holding Register

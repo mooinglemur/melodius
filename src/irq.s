@@ -114,7 +114,7 @@ handler:
     lda VIA1::Reg::T1CL ; clear T1 interrupt flag on VIA
     lda use_via_timer
     beq @vend
-    
+
     dec via_timer_iter
     bne @vend
 
