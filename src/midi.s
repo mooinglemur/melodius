@@ -17,7 +17,7 @@
 .export vis_ext_ch, vis_ext_note
 
 .export midibeat, midimeasure, midi_timesig_numerator, midi_timesig_denominator
-.export midi_tempo, midi_keysig, midi_mode, midipan
+.export midi_tempo, midi_keysig, midi_mode, midipan, midi_msg_sent
 
 .import divide40_24
 .import multiply16x16
@@ -136,6 +136,7 @@
     rpnlsb      .byte MIDI_CHANNELS ; currently understood only for pitch bend depth
     rpnmsb      .byte MIDI_CHANNELS ; currently understood only for pitch bend depth
     ext_enable  .byte MIDI_CHANNELS ; means we route this to external MIDI
+    msg_sent    .byte MIDI_CHANNELS ; for visualization
 .endstruct
 
 .struct YMChannel
@@ -210,6 +211,7 @@ midi_timesig_denominator := midistate + MIDIState::timesig_denominator
 midi_tempo := midistate + MIDIState::tempo_bcd_bytes
 midi_keysig := midistate + MIDIState::keysig_sharps
 midi_mode := midistate + MIDIState::keysig_mode
+midi_msg_sent := midichannels + MIDIChannel::msg_sent
 
 .segment "CODE"
 
@@ -1031,12 +1033,13 @@ extloop:
     ; are we in playback mode?
     ; bail out immediately if not
     lda midistate + MIDIState::playing
-    bne :+
-    jmp end
-:
+    jeq end
+
+
     stz tracks_playing
     stz track_iter
 
+	stz sent_serial_bytes
 
     ; calculate beat deltas
     sec
@@ -1141,6 +1144,14 @@ trackloop:
     sta midizp+1
 
 eventloop:
+	lda #30
+max_serial_bytes := * - 1
+	beq check_delta
+	cmp #$00
+sent_serial_bytes := * - 1
+	bcc nexttrack
+	beq nexttrack
+check_delta:
     ; if the MSB of the track's delta is positive, we're now
     ; in delay, so move on to the next track
     ldx track_iter
@@ -1188,7 +1199,7 @@ normal_status:
     beq event_sysex       ; $F7
     cmp #$FF
     beq event_meta        ; $FF 
-    
+
 event_error:
     stz miditracks + MIDITrack::playable,x
     bra nexttrack
@@ -1225,7 +1236,7 @@ event_meta: ; $FF
     ; bra next_event (no need)
 next_event:
     jsr get_delta ; this loads X with track_iter
-    bra eventloop
+    jmp eventloop
 
 nexttrack:
     ; save track state first
@@ -1239,6 +1250,7 @@ nexttrack:
     adc midizp
     sta miditracks + MIDITrack::curoffsetL,x
     lda midizp+1
+    adc #0
     sta miditracks + MIDITrack::curoffsetH,x
 
 nexttrack_nosave:
@@ -1293,6 +1305,7 @@ end:
     rts
 .endproc
 
+sent_serial_bytes = midi_playtick::sent_serial_bytes
 
 ; finds an empty YM channel or steals one
 ; current strategy is in this order:
@@ -1534,6 +1547,9 @@ end:
 .proc do_event_note_off: near
     and #$0F
     sta midichannel_iter
+    tax
+    lda #6
+    sta midichannels + MIDIChannel::msg_sent,x
 
     jsr fetch_indirect_byte
     sta note_iter ; note value
@@ -1611,6 +1627,10 @@ end:
 .proc do_event_note_on: near
     and #$0F
     sta midichannel_iter
+
+    tax
+    lda #6
+    sta midichannels + MIDIChannel::msg_sent,x
 
     jsr fetch_indirect_byte
     sta note_iter ; note value
@@ -1940,6 +1960,10 @@ lyrloop:
     and #$0F
     sta midichannel_iter
 
+    tax
+    lda #6
+    sta midichannels + MIDIChannel::msg_sent,x
+
     jsr fetch_indirect_byte
     ldx midichannel_iter
     sta midichannels + MIDIChannel::instrument,x
@@ -1954,6 +1978,8 @@ lyrloop:
     sta midichannel_iter
 
     tax
+    lda #6
+    sta midichannels + MIDIChannel::msg_sent,x
     bit midichannels + MIDIChannel::ext_enable,x
     bpl :+
     jmp serial_send_note_aft
@@ -1965,7 +1991,8 @@ lyrloop:
     sta midichannel_iter
 
     tax
-
+    lda #6
+    sta midichannels + MIDIChannel::msg_sent,x
     bit midichannels + MIDIChannel::ext_enable,x
     bpl :+
     jsr serial_send_controller
@@ -2222,6 +2249,9 @@ end:
     sta midichannel_iter
 
     tax
+    lda #6
+    sta midichannels + MIDIChannel::msg_sent,x
+
     bit midichannels + MIDIChannel::ext_enable,x
     bpl :+
     jmp serial_send_ch_aft
@@ -2287,6 +2317,8 @@ pitch_bend:
     sta midichannel_iter
 
     tax
+    lda #6
+    sta midichannels + MIDIChannel::msg_sent,x
     bit midichannels + MIDIChannel::ext_enable,x
     bpl :+
     jmp serial_send_pitchbend
@@ -2435,6 +2467,7 @@ timeout:
     lda $9f00
 TO = * - 2
     sta debug_byte
+    inc sent_serial_bytes
 plarts:
     pla
     rts
@@ -2477,7 +2510,7 @@ plarts:
     clc
     adc #sTHR
     sta serial_send_byte::IOsTHR
-    
+
     stz last_serial_cmd
 
     plp
@@ -2579,7 +2612,7 @@ found:
     sta last_serial_cmd
     beq :+
     jsr serial_send_byte
-:   
+:
     jsr fetch_indirect_byte
     jsr serial_send_byte
 
@@ -2617,9 +2650,6 @@ found:
     lda midichannel_iter
     ora #$d0
     sta last_serial_cmd
-    jsr serial_send_byte
-
-    jsr fetch_indirect_byte
     jsr serial_send_byte
 
     jsr fetch_indirect_byte

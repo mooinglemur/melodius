@@ -1527,8 +1527,11 @@ row:
     sta dptr
     lda cactive+1
     cmp cvis+1
-    bne end
+    jne end
     sta dptr+1
+
+    lda #DIR_BANK
+    sta X16::Reg::RAMBank
 
     lda reset_hilight_scroll
     beq scrollit
@@ -1582,7 +1585,7 @@ displayonce:
     sta Vera::Reg::Data0
     iny
     dex
-    bne :-    
+    bne :-
     rts
 checklastlinger:
     lda lingertimer

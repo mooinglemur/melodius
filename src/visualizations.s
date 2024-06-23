@@ -29,8 +29,9 @@
 .import midi_set_external
 .import midi_serial_init
 .import midimeasure, midibeat, midi_tempo, midi_keysig, midi_mode
-.import vis_ext_ch, vis_ext_note, midipan
+.import vis_ext_ch, vis_ext_note, midipan, midi_msg_sent
 .export update_instruments
+.export update_midi_message_flash
 .export do_midi_sprites
 .export do_zsm_sprites
 .export setup_sprites
@@ -1193,6 +1194,48 @@ point_cursor:
 	rts
 .endproc
 
+.proc update_midi_message_flash: near
+	ldx #0
+loop:
+	lda midi_msg_sent,x
+	beq next_chan
+
+	ldy poslow,x
+	sty Vera::Reg::AddrL
+	ldy posmed,x
+	sty Vera::Reg::AddrM
+	ldy #$21
+	sty Vera::Reg::AddrH
+
+	dec
+	sta midi_msg_sent,x
+	beq clearit
+
+	lda #$d0
+	sta Vera::Reg::Data0
+	sta Vera::Reg::Data0
+
+	bra next_chan
+clearit:
+	lda #$0e
+	sta Vera::Reg::Data0
+	sta Vera::Reg::Data0
+next_chan:
+	inx
+	cpx #16
+	bcc loop
+	rts
+poslow:
+	.byte 85,85,85,85,85,85,85,85
+	.byte 117,117,117,117,117,117,117,117
+posmed:
+.repeat 2
+.repeat 8,i
+	.byte i+$C4
+.endrepeat
+.endrepeat
+.endproc
+
 .proc update_instruments: near
 	; make white on black
 	lda #$90
@@ -1208,7 +1251,7 @@ instloop:
 	lda midiinst,x
 	cmp instrument,x
 	bne instchange
-	
+
 	ldy instrument_cursor,x
 	cpy #CURSOR_LINGER ; turn off cursor
 	beq turn_off_cursor

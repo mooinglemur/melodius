@@ -1,3 +1,5 @@
+;KIOSK = 1
+
 .macpack longbranch
 
 .segment "LOADADDR"
@@ -52,6 +54,7 @@ controller_edge:
 .import do_zsm_sprites
 .import update_instruments
 .import update_midi_beat
+.import update_midi_message_flash
 
 .import init_directory
 .import load_directory
@@ -167,7 +170,16 @@ noskinny:
 
 	jsr load_directory
 	jsr show_directory
+
+.ifdef KIOSK
+	lda #2
+	sta jukebox
+.endif
 	jsr legend_jukebox
+.ifdef KIOSK
+	jsr loadrandom
+	jsr scroll_active_file_if_needed
+.endif
 endless:
 	jsr X16::Kernal::RDTIM
 	sta FRC
@@ -287,6 +299,7 @@ endkey:
 ismidi:
 	jsr do_midi_sprites
 	jsr update_instruments
+	jsr update_midi_message_flash
 	jsr draw_lyric
 	jsr update_midi_beat
 	lda paused
