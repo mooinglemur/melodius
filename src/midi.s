@@ -604,6 +604,10 @@ iloop:
     cpx #YM2151_CHANNELS
     bcc iloop
 
+    ; MIDI full reset
+    lda #$ff
+    jsr serial_send_byte
+
     ; We're resetting the controller state on all the MIDI channels
     ; to defaults
     ldx #0
@@ -625,35 +629,7 @@ mloop:
 
     stx midichannel_iter
 
-    txa
-    ora #$b0 ; controller
-    sta last_serial_cmd
-    jsr serial_send_byte
-
-    ; send all notes off
-    lda #123
-    jsr serial_send_byte
-    lda #0
-    jsr serial_send_byte
-
-    ; send reset all controllers
-    lda #121
-    jsr serial_send_byte
-    lda #0
-    jsr serial_send_byte
-
-    ; send bank 0
-    lda #0
-    jsr serial_send_byte
-    lda #0
-    jsr serial_send_byte
-
-    lda #$20
-    jsr serial_send_byte
-    lda #0
-    jsr serial_send_byte
-
-    ; reset program to 0 (as needed after a bank change)
+    ; reset program to 0
     lda #0
     jsr serial_send_progchange
 
@@ -666,6 +642,8 @@ mcont:
     inx
     cpx #MIDI_CHANNELS
     bcc mloop
+
+    jsr send_init_sysex
 
     ldx #0
     lda #$ff
@@ -2513,8 +2491,55 @@ plarts:
 
     stz last_serial_cmd
 
+    jsr send_init_sysex
+
     plp
     rts
+.endproc
+
+.proc send_init_sysex
+    ldx #0
+loop1:
+    txa
+    and #$10
+    sta part_byte1
+    txa
+    and #$20
+    sta part_byte2
+    phx
+    ldy #0
+loop2:
+    lda sysex,y
+    cmp #$ff
+    beq l2e
+    jsr serial_send_byte
+    iny
+    bra loop2
+l2e:
+    plx
+    inx
+    cpx #16
+    bcc loop1
+    rts
+sysex:
+sysex1:
+    .byte $F0,$41,$00,$42,$12,$40
+part_byte1:
+    .byte $10
+    .byte $1F,$4A
+checksum1:
+    .byte $57
+    .byte $F7
+sysex2:
+    .byte $F0,$41,$00,$42,$12,$40
+part_byte2:
+    .byte $20
+    .byte $41,$00
+checksum2:
+    .byte $7F
+    .byte $F7
+eox:
+    .byte $FF
 .endproc
 
 .proc serial_send_noteoff: near
