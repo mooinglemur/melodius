@@ -629,6 +629,43 @@ mloop:
 
     stx midichannel_iter
 
+    txa
+    ora #$b0
+    sta last_serial_cmd
+    jsr serial_send_byte
+
+    ; zero res/cutoff
+    lda #74
+    jsr serial_send_byte
+
+    lda #0
+    jsr serial_send_byte
+
+    lda #71
+    jsr serial_send_byte
+
+    lda #0
+    jsr serial_send_byte
+
+    ; cutoff nrpn
+    lda #99
+    jsr serial_send_byte
+
+    lda #$01
+    jsr serial_send_byte
+
+    lda #98
+    jsr serial_send_byte
+
+    lda #$21
+    jsr serial_send_byte
+
+    lda #6
+    jsr serial_send_byte
+
+    lda #0
+    jsr serial_send_byte
+
     ; reset program to 0
     lda #0
     jsr serial_send_progchange
