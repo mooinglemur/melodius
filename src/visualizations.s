@@ -2958,10 +2958,17 @@ redraw:
 	.byte "External MIDI DISABLED (use L/R arrows)",0
 	bra iocont
 ioenab:
+	and #4
+	bne iodream
 	jsr X16::Kernal::PRIMM
 	.byte "  External MIDI serial I/O base $9F",0
-
+	bra basecont
+iodream:
+	jsr X16::Kernal::PRIMM
+	.byte " External Dreamer card I/O base $9F",0
+basecont:
 	lda external_midi_io
+	and #%11111000
 	jsr print_hex
 
 	jsr X16::Kernal::PRIMM
@@ -3083,13 +3090,13 @@ midi_channel_toggle:
 dec_io:
 	lda external_midi_io
 	jeq redraw
-	cmp #$68
+	cmp #$64
 	bcs trydec
 	stz external_midi_io
 	jmp redraw
 trydec:
 	sec
-	sbc #$08
+	sbc #$04
 	sta external_midi_io
 	jmp redraw
 inc_io:
@@ -3100,9 +3107,9 @@ inc_io:
 	sta external_midi_io
 	jmp redraw
 tryinc:
-	cmp #$f8
+	cmp #$fc
 	jcs redraw
-	adc #$08
+	adc #$04
 	sta external_midi_io
 	jmp redraw
 midi_all_toggle:

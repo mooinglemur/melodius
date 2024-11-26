@@ -2461,6 +2461,9 @@ write_mod:
 
 .proc serial_send_byte: near
     pha
+    lda #$00
+isDREAMER = * - 1
+    bne dreamer
     lda IOsTHR
     cmp #$60
     bcc plarts
@@ -2475,6 +2478,7 @@ plasta:
     pla
     sta $9f00
 IOsTHR = * - 2
+    inc sent_serial_bytes
     rts
 timeout:
     lda IOsLSR
@@ -2482,11 +2486,16 @@ timeout:
     lda $9f00
 TO = * - 2
     sta debug_byte
-    inc sent_serial_bytes
 plarts:
     pla
     rts
-
+dreamer:
+    ldx DR_DATA
+    jsr wait_for_dreamer_ready
+    pla
+    sta $9f00
+DR_DATA = * - 2
+    rts
 .endproc
 
 .proc midi_serial_init: near
@@ -2495,6 +2504,9 @@ plarts:
 
     tax
     beq :+ ; don't initialize the zero device
+
+    and #4
+    bne dreamer
 
     lda #LCR_DLAB
     sta IO_BASE + sLCR, x
@@ -2526,11 +2538,50 @@ plarts:
     adc #sTHR
     sta serial_send_byte::IOsTHR
 
+    stz serial_send_byte::isDREAMER
+
+    bra cont
+dreamer:
+    txa
+    and #%11111000
+    tax
+
+    sta serial_send_byte::DR_DATA
+
+    jsr wait_for_dreamer_ready
+    lda #$FF
+    sta IO_BASE+1,x
+    jsr wait_for_dreamer_ready
+    lda #$3F
+    sta IO_BASE+1,x
+    jsr wait_for_dreamer_ready
+cont:
     stz last_serial_cmd
+
+    lda #$80
+    sta serial_send_byte::isDREAMER
+
 
     jsr send_init_sysex
 
     plp
+    rts
+.endproc
+
+.proc wait_for_dreamer_ready ; X = offset
+.repeat 3 ; ensure 3.5+ µs delay
+    php
+    plp
+.endrepeat
+    phy
+    ldy #0
+waitloop:
+    bit IO_BASE,x
+    bvc dreamer_ready
+    dey
+    bne waitloop
+dreamer_ready:
+    ply
     rts
 .endproc
 
