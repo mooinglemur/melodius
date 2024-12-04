@@ -2576,7 +2576,7 @@ cont:
     phy
     ldy #0
 waitloop:
-    bit IO_BASE,x
+    bit IO_BASE+1,x
     bvc dreamer_ready
     dey
     bne waitloop

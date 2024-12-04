@@ -22,7 +22,7 @@ default: all
 all: $(EXE)
 
 $(EXE): releasedate $(OBJS) $(CONFIG)
-	$(LD) $(LDFLAGS) $(OBJS) -m $(MAPFILE) -Ln $(SYMFILE) ./extern/zsmkit.lib -o $@ 
+	$(LD) $(LDFLAGS) $(OBJS) -m $(MAPFILE) -Ln $(SYMFILE) -o $@ 
 
 $(OBJ)/%.o: $(SRC)/%.s | $(OBJ)
 	$(AS) $(ASFLAGS) $< -o $@

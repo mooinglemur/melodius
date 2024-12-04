@@ -72,6 +72,7 @@
 .include "zsmkit.inc"
 .endscope
 
+ZSMKIT_BANK = 1
 DIR_BANK = 2
 SORT_BANK = 3
 LOAD_BANK = 4
@@ -143,7 +144,7 @@ errornum:
     .res 1
 
 .proc sortdir: near
-    
+
     lda msortinto
     sta dptr2
     lda msortinto+1
@@ -160,7 +161,7 @@ nextpass:
 
     lda (dptr)
     jeq end ; empty sort dir
-    
+
     bra nextfile
 advance:
     lda (dptr),y
@@ -707,6 +708,9 @@ isfile:
     cmp #3
     jeq waszcm
 loadnewfile:
+    lda #DIR_BANK
+    sta X16::Reg::RAMBank
+
     lda is_lazy_loading
     beq :+
     stz is_lazy_loading
@@ -988,10 +992,12 @@ close_zsm_continue:
     stz is_lazy_loading
 
 zsm_continue:
-
+    lda #ZSMKIT_BANK
+    sta X16::Reg::RAMBank
 
     lda #LOAD_BANK
-    sta X16::Reg::RAMBank
+    ldx #0
+    jsr zsmkit::zsm_setbank
 
     ldx #0
     lda #$00
@@ -1068,8 +1074,12 @@ load_zcm:
 
     jsr loader::load_remainder
 
-    lda #LOAD_BANK
+    lda #ZSMKIT_BANK
     sta X16::Reg::RAMBank
+
+    ldx #0
+    lda #LOAD_BANK
+    jsr zsmkit::zcm_setbank
 
     ldx #0
     lda #<$a000
@@ -1093,6 +1103,8 @@ wasmidi:
 waszsm:
     jsr hide_sprites
     stz playback_mode
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
     ldx #0
     jsr zsmkit::zsm_close
     jsr clear_via_timer
@@ -1110,6 +1122,9 @@ tmp_len:
 .proc apply_ticker_behavior
     php
     sei
+
+    lda #ZSMKIT_BANK
+    sta X16::Reg::RAMBank
 
     ldx #0
     jsr zsmkit::zsm_getrate
@@ -1236,7 +1251,7 @@ exit:
 .proc dirlist_nav_down
     cmp #0
     beq exit
-    tax    
+    tax
     lda #DIR_BANK
     sta X16::Reg::RAMBank
 

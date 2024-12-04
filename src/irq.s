@@ -15,6 +15,8 @@
 .import midi_playtick
 .import playback_mode
 
+ZSMKIT_BANK = 1
+
 .segment "BSS"
 old_irq_handler:
     .res 2
@@ -88,6 +90,8 @@ handler:
 
     lda X16::Reg::RAMBank
     pha
+    lda #ZSMKIT_BANK
+    sta X16::Reg::RAMBank
 
     MIDI_BORDER
 

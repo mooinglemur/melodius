@@ -60,6 +60,8 @@
 .export midi_ext_enable
 .export debug_byte
 
+ZSMKIT_BANK = 1
+
 .segment "BSS"
 
 iterator:
@@ -679,18 +681,23 @@ legende:
 
 	lda #'$'
 	jsr X16::Kernal::BSOUT
-	lda #1 ; zsmkit bank
+	lda #ZSMKIT_BANK
 	sta X16::Reg::RAMBank
 
-	lda zsmkit::loop_enable ; prio 0
-	beq blank
-	lda zsmkit::zsm_loop_bank ; prio 0
+	ldx #0
+	jsr zsmkit::zsm_getloop
+	bcs blank
+
+	phx
+	phy
+
 	jsr print_hex
 	lda #':'
 	jsr X16::Kernal::BSOUT
-	lda zsmkit::zsm_loop_h ; prio 0
+
+	pla
 	jsr print_hex
-	lda zsmkit::zsm_loop_l ; prio 0
+	pla
 	jmp print_hex
 blank:
 	lda #'-'
@@ -721,15 +728,22 @@ blank:
 
 	lda #'$'
 	jsr X16::Kernal::BSOUT
-	lda #1 ; zsmkit bank
+	lda #ZSMKIT_BANK
 	sta X16::Reg::RAMBank
-	lda zsmkit::zsm_ptr_bank ; prio 0
+
+	ldx #0
+	jsr zsmkit::zsm_getptr
+
+	phx
+	phy
+
 	jsr print_hex
 	lda #':'
 	jsr X16::Kernal::BSOUT
-	lda zsmkit::zsm_ptr_h ; prio 0
+
+	pla
 	jsr print_hex
-	lda zsmkit::zsm_ptr_l ; prio 0
+	pla
 	jmp print_hex
 .endproc
 
@@ -1793,24 +1807,89 @@ end:
 .proc do_zsm_ym_sprites: near
 	stz iterator
 
-	lda #1
+	lda #ZSMKIT_BANK
 	sta X16::Reg::RAMBank
+
+	ldx #0
+	jsr zsmkit::zsm_getksptr
+	stx KSPTR
+	sty KSPTR+1
+
+	ldx #0
+	jsr zsmkit::zsm_getosptr
+	clc
+
+	txa
+	adc #$20
+	sta OSp20
+	sta OSp20a
+	sta OSp20b
+	tya
+	adc #0
+	sta OSp20+1
+	sta OSp20a+1
+	sta OSp20b+1
+
+	txa
+	adc #$28
+	sta OSp28
+	tya
+	adc #0
+	sta OSp28+1
+
+	txa
+	adc #$30
+	sta OSp30
+	tya
+	adc #0
+	sta OSp30+1
+
+	txa
+	adc #$60
+	sta OSp60
+	tya
+	adc #0
+	sta OSp60+1
+
+	txa
+	adc #$68
+	sta OSp68
+	tya
+	adc #0
+	sta OSp68+1
+
+	txa
+	adc #$70
+	sta OSp70
+	tya
+	adc #0
+	sta OSp70+1
+
+	txa
+	adc #$78
+	sta OSp78
+	tya
+	adc #0
+	sta OSp78+1
 
 	ldx iterator
 sploop:
-	lda zsmkit::opm_key_shadow,x
+	lda $ffff,x ; key shadow
+KSPTR = * - 2
 	and #$38
 	jeq hideit
 
-	lda zsmkit::opm_shadow+$28,x
+	lda $ffff,x ; opm shadow + $28
+OSp28 = * - 2
 	tax
 
 	JSRFAR AudioAPI::notecon_fm2midi, $0a
 	bcs high
 	stx midinote
-	
+
 	ldx iterator
-	lda zsmkit::opm_shadow+$30,x
+	lda $ffff,x ; opm shadow + $30
+OSp30 = * - 2
 
 	bpl :+
 	inc midinote
@@ -1853,7 +1932,8 @@ high:
 	stz panright
 
 	ldx iterator
-	lda zsmkit::opm_shadow+$20,x
+	lda $ffff,x ; opm shadow + $20
+OSp20 = * - 2
 	and #$07
 	tay
 	lda wav2color,y
@@ -1864,7 +1944,8 @@ high:
 	stz tmp2
 
 chkpan:
-	lda zsmkit::opm_shadow+$20,x
+	lda $ffff,x ; opm shadow + $20
+OSp20a = * - 2
 	rol
 	rol
 	rol
@@ -1922,7 +2003,7 @@ endbend:
 	asl
 	asl
 	asl
-	
+
 	; add #320 and drop the X coord
 	clc
 	adc #<(48)
@@ -1953,7 +2034,8 @@ endbend:
 	sta Vera::Reg::Data0
 
 	; get the alg
-	lda zsmkit::opm_shadow+$20,x
+	lda $ffff,x ; opm shadow + $20
+OSp20b = * - 2
 	and #$07
 	tay
 	lda alg2mask,y
@@ -1964,26 +2046,30 @@ endbend:
 m1:
 	lsr tmp1
 	bcc m2
-	lda zsmkit::opm_shadow+$60,x
+	lda $ffff,x ; opm shadow + $60
+OSp60 = * - 2
 	cmp tmp2
 	bcs m2
 	sta tmp2
 m2:
 	lsr tmp1
 	bcc c1
-	lda zsmkit::opm_shadow+$68,x
+	lda $ffff,x ; opm shadow + $68
+OSp68 = * - 2
 	cmp tmp2
 	bcs c1
 	sta tmp2
 c1:
 	lsr tmp1
 	bcc c2
-	lda zsmkit::opm_shadow+$70,x
+	lda $ffff,x ; opm shadow + $70
+OSp70 = * - 2
 	cmp tmp2
 	bcs c2
 	sta tmp2
 c2: ; C2 is always a carrier
-	lda zsmkit::opm_shadow+$78,x
+	lda $ffff,x ; opm shadow + $78
+OSp78 = * - 2
 	cmp tmp2
 	bcs vol
 	sta tmp2
@@ -2023,8 +2109,8 @@ wav2color:
 .endproc
 
 .proc do_zsm_pcm_sprite: near
-	lda zsmkit::pcm_busy
-	beq hideit
+	bit Vera::Reg::AudioCtrl
+	bvs hideit
 
 	lda Vera::Reg::AudioCtrl
 	lsr
@@ -2092,19 +2178,59 @@ wav2color:
 .proc do_zsm_psg_sprites: near
 	stz iterator
 
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
+
+	ldx #0
+	jsr zsmkit::zsm_getpsptr
+	clc
+
+	stx PSp0
+	sty PSp0+1
+
+	txa
+	adc #1
+	sta PSp1
+	tya
+	adc #0
+	sta PSp1+1
+
+	txa
+	adc #2
+	sta PSp2
+	sta PSp2a
+	sta PSp2b
+	tya
+	adc #0
+	sta PSp2+1
+	sta PSp2a+1
+	sta PSp2b+1
+
+	txa
+	adc #3
+	sta PSp3
+	sta PSp3a
+	tya
+	adc #0
+	sta PSp3+1
+	sta PSp3a+1
+
 	ldx iterator
 sploop:
 	txa
 	asl
 	asl
 	tax
-	lda zsmkit::vera_psg_shadow+2,x
+	lda $ffff,x ; psg shadow + 2
+PSp2 = * - 2
 	and #$3f
 	jeq hideit
 
-	lda zsmkit::vera_psg_shadow+1,x
+	lda $ffff,x ; psg shadow + 1
+PSp1 = * - 2
 	tay
-	lda zsmkit::vera_psg_shadow+0,x
+	lda $ffff,x ; psg shadow + 0
+PSp0 = * - 2
 	tax
 
 	stz midifrac
@@ -2154,7 +2280,8 @@ aftertuning:
 	asl
 	asl
 	tax
-	lda zsmkit::vera_psg_shadow+3,x
+	lda $ffff,x ; psg shadow + 3
+PSp3 = * -2
 	rol
 	rol
 	rol
@@ -2163,7 +2290,8 @@ aftertuning:
 	bne notsq ; colorful based on duty
 	lda #$53
 	sta PAL
-	lda zsmkit::vera_psg_shadow+3,x
+	lda $ffff,x ; psg shadow + 3
+PSp3a = * - 2
 	and #$3c
 	bne aftersq
 	lda #$04
@@ -2200,7 +2328,8 @@ high:
 
 
 chkvol:
-	lda zsmkit::vera_psg_shadow+2,x
+	lda $ffff,x ; psg shadow + 2
+PSp2a = * - 2
 	eor #$ff
 	and #$30
 	lsr
@@ -2211,7 +2340,8 @@ chkvol:
 
 
 chkpan:
-	lda zsmkit::vera_psg_shadow+2,x
+	lda $ffff,x ; psg shadow + 2
+PSp2b = * - 2
 	rol
 	rol
 	rol

@@ -23,6 +23,9 @@ controller_last:
 	.res 2
 controller_edge:
 	.res 2
+zsmkit_lowram:
+	.res 256
+
 .segment "CODE"
 
 .include "x16.inc"
@@ -30,8 +33,12 @@ controller_edge:
 	.include "audio.inc"
 .endscope
 
+ZSMKIT_BANK = 1
+
 .export playback_mode
 .export paused
+
+.import __ZSMKITLIB_LOAD__
 
 .import register_handler
 .import deregister_handler
@@ -148,9 +155,13 @@ noskinny:
 
 	stz controller_hold
 
+	jsr copy_zsmkit_lib
 
-	lda #1
-	sta X16::Reg::RAMBank
+    lda #ZSMKIT_BANK
+    sta X16::Reg::RAMBank
+
+	ldx #<zsmkit_lowram
+	ldy #>zsmkit_lowram
 	jsr zsmkit::zsm_init_engine
 
 	ldx #0
@@ -325,6 +336,9 @@ iszsm:
 	jsr draw_zsm_tuning
 	jsr do_zsm_sprites
 
+    lda #ZSMKIT_BANK
+    sta X16::Reg::RAMBank
+
 	lda stopping
 	beq loopck
 	; we're stopping
@@ -342,8 +356,8 @@ doatten:
 	bra zsmck
 iszcm:
 	jsr do_zsm_sprites
-	lda zsmkit::pcm_busy
-	bne continue
+	bit Vera::Reg::AudioCtrl
+	bvc continue
 	jsr hide_sprites
 	bra songstopped
 stopzcm:
@@ -373,6 +387,8 @@ ckloadnext:
 :	jsr loadnext
 	bcc continue
 stopzsm:
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
 	ldx #0
 	jsr zsmkit::zsm_close
 	jsr hide_sprites
@@ -393,6 +409,8 @@ continue:
 	beq exit
 	jmp endless
 pausezsm:
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
 	lda paused
 	bne resumezsm
 	ldx #0
@@ -419,9 +437,6 @@ resumemidi:
 
 exit:
 	jsr deregister_handler
-
-	lda #1
-	jsr zsmkit::zsm_init_engine
 
 	JSRFAR AudioAPI::ym_init, $0A
 
@@ -682,6 +697,9 @@ ff_zsm:
 	lda X16::Reg::RAMBank
 	pha
 
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
+
 	ldx #0
 ff_zsm_loop:
 	phx
@@ -699,3 +717,23 @@ ff_zsm_loop:
 	sta X16::Reg::ROMBank
 
 	jmp rekey
+
+.proc copy_zsmkit_lib: near
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
+
+	lda #<__ZSMKITLIB_LOAD__
+	sta X16::Reg::r0L
+
+	lda #>__ZSMKITLIB_LOAD__
+	sta X16::Reg::r0H
+
+	stz X16::Reg::r1L
+	lda #$a0
+	sta X16::Reg::r1H
+
+	jmp X16::Kernal::MEMORY_DECOMPRESS
+.endproc
+
+.segment "ZSMKITLIB"
+.incbin "extern/zsmkit-a000.bin.lzsa"
