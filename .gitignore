@@ -1,5 +1,7 @@
 *.PRG
 obj
-sdcard.img
+*.img
 *.map
 *.sym
+*.zip
+src/releasedate.inc
