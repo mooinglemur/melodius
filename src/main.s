@@ -37,6 +37,7 @@ ZSMKIT_BANK = 1
 
 .export playback_mode
 .export paused
+.export zsmkit_lowram
 
 .import __ZSMKITLIB_LOAD__
 
@@ -499,6 +500,8 @@ keytab:
 	.byte $20 ; Space
 	.byte $0d ; Return
 	.byte $1d ; Right Arrow
+	.byte '1'
+	.byte '!'
 keytab_end:
 
 joytab:
@@ -549,6 +552,46 @@ keyopertab:
 	.word SPACE_func
 	.word RETURN_func
 	.word RIGHTARROW_func
+	.word KEY1_func
+	.word KEYshift1_func
+
+
+KEY1_func:
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
+	sec
+	ldy #0
+	jsr zsmkit::zsm_psg_suspend
+	sec
+	ldy #1
+	jsr zsmkit::zsm_psg_suspend
+	sec
+	ldy #2
+	jsr zsmkit::zsm_psg_suspend
+	sec
+	ldy #3
+	jsr zsmkit::zsm_psg_suspend
+	jmp rekey
+
+KEYshift1_func:
+	lda #ZSMKIT_BANK
+	sta X16::Reg::RAMBank
+	clc
+	ldy #0
+	jsr zsmkit::zsm_psg_suspend
+	clc
+	ldy #1
+	jsr zsmkit::zsm_psg_suspend
+	clc
+	ldy #2
+	jsr zsmkit::zsm_psg_suspend
+	clc
+	ldy #3
+	jsr zsmkit::zsm_psg_suspend
+
+
+	jmp rekey
+
 
 F1_func:
 	inc jukebox

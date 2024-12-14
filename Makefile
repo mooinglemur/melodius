@@ -3,6 +3,7 @@ UC = $(shell echo '$1' | tr '[:lower:]' '[:upper:]')
 PROJECT	:= melodius
 AS		:= ca65
 LD		:= ld65
+CL      := cl65
 MKDIR	:= mkdir -p
 RMDIR	:= rmdir -p
 CONFIG  := ./$(PROJECT).cfg
@@ -14,6 +15,8 @@ SRCS	:= $(wildcard $(SRC)/*.s)
 OBJS    := $(patsubst $(SRC)/%.s,$(OBJ)/%.o,$(SRCS))
 EXE		:= $(call UC,$(PROJECT).PRG)
 SDCARD	:= ./sdcard.img
+TILESR	:= ./tiles.bin
+TILESZ	:= ./tiles.bin.lzsa
 MAPFILE := ./$(PROJECT).map
 SYMFILE := ./$(PROJECT).sym
 
@@ -21,7 +24,7 @@ default: all
 
 all: $(EXE)
 
-$(EXE): releasedate $(OBJS) $(CONFIG)
+$(EXE): releasedate $(TILESZ) $(OBJS) $(CONFIG)
 	$(LD) $(LDFLAGS) $(OBJS) -m $(MAPFILE) -Ln $(SYMFILE) -o $@ 
 
 $(OBJ)/%.o: $(SRC)/%.s | $(OBJ)
@@ -29,6 +32,12 @@ $(OBJ)/%.o: $(SRC)/%.s | $(OBJ)
 
 $(OBJ):
 	$(MKDIR) $@
+
+$(TILESR):
+	$(CL) -C ./$(PROJECT)-tiles.cfg ./src/tiles.asm -o $(TILESR)
+
+$(TILESZ): $(TILESR)
+	lzsa -r -f 2 $(TILESR) $(TILESZ)
 
 $(SDCARD): $(EXE)
 	$(RM) $(SDCARD)
@@ -40,7 +49,7 @@ $(SDCARD): $(EXE)
 
 .PHONY: clean run releasedate
 clean:
-	$(RM) $(EXE) $(OBJS) $(SDCARD) $(MAPFILE) $(SYMFILE)
+	$(RM) $(EXE) $(OBJS) $(SDCARD) $(MAPFILE) $(SYMFILE) $(TILESR) $(TILESZ)
 
 releasedate:
 	/bin/echo -n $$(/bin/date '+%Y%m%d') > src/releasedate.inc
@@ -50,5 +59,3 @@ box: $(EXE) $(SDCARD)
 
 run: $(EXE) $(SDCARD)
 	x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -scale 2 -run -ram 1024
-#	x16emu -sdcard $(SDCARD) -prg $(EXE) -debug -scale 2 -run
-	

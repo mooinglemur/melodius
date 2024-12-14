@@ -4,4 +4,6 @@ obj
 *.map
 *.sym
 *.zip
+tiles.bin
+tiles.bin.lzsa
 src/releasedate.inc

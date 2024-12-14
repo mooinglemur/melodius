@@ -2549,18 +2549,13 @@ dreamer:
     sta serial_send_byte::DR_DATA
 
     jsr wait_for_dreamer_ready
-    lda #$FF
-    sta IO_BASE+1,x
-    jsr wait_for_dreamer_ready
     lda #$3F
     sta IO_BASE+1,x
-    jsr wait_for_dreamer_ready
-cont:
-    stz last_serial_cmd
 
     lda #$80
     sta serial_send_byte::isDREAMER
-
+cont:
+    stz last_serial_cmd
 
     jsr send_init_sysex
 
@@ -2569,10 +2564,6 @@ cont:
 .endproc
 
 .proc wait_for_dreamer_ready ; X = offset
-.repeat 3 ; ensure 3.5+ µs delay
-    php
-    plp
-.endrepeat
     phy
     ldy #0
 waitloop:

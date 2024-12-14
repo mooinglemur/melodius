@@ -61,6 +61,7 @@
 .import flash_pause_zsm
 .import flash_pause_midi
 
+.import zsmkit_lowram
 
 .include "x16.inc"
 
@@ -708,6 +709,17 @@ isfile:
     cmp #3
     jeq waszcm
 loadnewfile:
+    lda #ZSMKIT_BANK
+    sta X16::Reg::RAMBank
+
+    lda external_midi_io
+    and #$04
+    tax
+    lda external_midi_io
+    and #%11111000
+
+	jsr zsmkit::zsm_midi_init
+
     lda #DIR_BANK
     sta X16::Reg::RAMBank
 

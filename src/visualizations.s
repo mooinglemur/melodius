@@ -2805,22 +2805,20 @@ note_external_mask:
 	ldx #<tileset
 	ldy #>tileset
 
-	stx TS
-	sty TS+1
-
 	VERA_SET_ADDR $4000, 1
 
-	ldx #$30
-	ldy #0
-tsloop:
-	lda $ffff,y
-TS = * - 2
-	sta Vera::Reg::Data0
-	iny
-	bne tsloop
-	inc TS+1
-	dex
-	bne tsloop
+	lda #<tileset
+	sta X16::Reg::r0L
+
+	lda #>tileset
+	sta X16::Reg::r0H
+
+	lda #<Vera::Reg::Data0
+	sta X16::Reg::r1L
+	lda #>Vera::Reg::Data0
+	sta X16::Reg::r1H
+
+	jsr X16::Kernal::MEMORY_DECOMPRESS
 
 	; clear $8000 of 64x32 tiles
 	; blank tile is $12 with attribute byte $10
