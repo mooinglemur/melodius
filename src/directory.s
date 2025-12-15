@@ -74,9 +74,9 @@
 .endscope
 
 ZSMKIT_BANK = 1
-DIR_BANK = 2
-SORT_BANK = 3
-LOAD_BANK = 4
+DIR_BANK = 3
+SORT_BANK = 4
+LOAD_BANK = 5
 
 .segment "ZEROPAGE"
 dptr:
@@ -2060,8 +2060,8 @@ nul_loop:
     sec
     jsr X16::Kernal::MEMTOP
     sec
-    sbc #4 ; take away the number of banks used by the system and Melodius
-           ; this has the nice side effect of 256 banks (0) becoming 252
+    sbc #LOAD_BANK ; take away the number of banks used by the system and Melodius
+                   ; this has the nice side effect of 256 banks (0) becoming 251
     cmp blk
     bcc no
 ok:

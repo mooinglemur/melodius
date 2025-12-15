@@ -39,7 +39,7 @@ ZSMKIT_BANK = 1
 .export paused
 .export zsmkit_lowram
 
-.import __ZSMKITLIB_LOAD__
+.import __ZSMKITLIB_LOAD__, __ZSMKITLIB_SIZE__
 
 .import register_handler
 .import deregister_handler
@@ -766,17 +766,47 @@ ff_zsm_loop:
 	sta X16::Reg::RAMBank
 
 	lda #<__ZSMKITLIB_LOAD__
-	sta X16::Reg::r0L
+	sta SRC
 
 	lda #>__ZSMKITLIB_LOAD__
-	sta X16::Reg::r0H
+	sta SRC+1
 
-	stz X16::Reg::r1L
+	stz DST
 	lda #$a0
-	sta X16::Reg::r1H
+	sta DST+1
 
-	jmp X16::Kernal::MEMORY_DECOMPRESS
+	ldx #<__ZSMKITLIB_SIZE__
+	ldy #>__ZSMKITLIB_SIZE__
+
+loop:
+	lda $ffff
+SRC = *-2
+	sta $ffff
+DST = *-2
+	inc SRC
+	bne :+
+	inc SRC+1
+:	inc DST
+	bne :+
+	inc DST+1
+	lda DST+1
+	cmp #$c0
+	bcc :+
+	sbc #$20
+	sta DST+1
+	inc X16::Reg::RAMBank
+:	dex
+	beq endchk
+	cpx #$ff
+	bne loop
+	dey
+	bra loop
+endchk:
+	cpy #0
+	bne loop
+done:
+	rts
 .endproc
 
 .segment "ZSMKITLIB"
-.incbin "extern/zsmkit-a000.bin.lzsa"
+.incbin "extern/zsmkit-a000.bin"
